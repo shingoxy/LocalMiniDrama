@@ -203,9 +203,7 @@ function getDrawtextFontOption() {
  */
 async function runMergedEpisodePostProcess(db, log, opts) {
   const { mergedAbsPath, storageRoot, scenes, episodeId, mergeOpts = {} } = opts;
-  const wantDial = !!mergeOpts.burn_dialogue_audio;
-  const wantNarr = !!mergeOpts.burn_narration_subtitles;
-  const watermarkText = (mergeOpts.watermark_text && String(mergeOpts.watermark_text).trim())
+  let watermarkText = (mergeOpts.watermark_text && String(mergeOpts.watermark_text).trim())
     ? String(mergeOpts.watermark_text).trim().slice(0, 200)
     : '';
 
@@ -213,6 +211,17 @@ async function runMergedEpisodePostProcess(db, log, opts) {
     return { ok: false, error: '无效合成参数' };
   }
 
+  const rows = scenes.map((sc) => db.prepare(
+    'SELECT e.drama_id, s.dialogue, s.narration, s.audio_local_path FROM storyboards s JOIN episodes e ON e.id = s.episode_id WHERE s.id = ? AND s.deleted_at IS NULL'
+  ).get(Number(sc.scene_id)));
+  const dialoguePath = (row) => row?.audio_local_path
+    ? path.join(storageRoot, String(row.audio_local_path).replace(/\//g, path.sep)) : null;
+  // Checked options alone must not create a silent replacement for the source audio.
+  const wantDial = !!mergeOpts.burn_dialogue_audio && rows.some((row) => {
+    const p = dialoguePath(row);
+    return p && fs.existsSync(p);
+  });
+  const wantNarr = !!mergeOpts.burn_narration_subtitles && rows.some((row) => row?.narration?.trim());
   const needAudio = wantDial || wantNarr;
   if (!needAudio && !watermarkText) {
     return { ok: false, error: 'NO_POST_OPTS' };
@@ -225,9 +234,18 @@ async function runMergedEpisodePostProcess(db, log, opts) {
 
   const tempRoot = path.join(require('os').tmpdir(), 'drama-merged-post', String(episodeId || 0), String(Date.now()));
   fs.mkdirSync(tempRoot, { recursive: true });
-  const ttsService = require('./ttsService');
 
   try {
+    const dramaId = opts.dramaId || rows.find((row) => row?.drama_id)?.drama_id;
+    const mediaLanguage = require('./mediaLanguage');
+    const texts = { watermark: watermarkText };
+    if (wantNarr) rows.forEach((row, i) => { texts[`narration_${i}`] = row?.narration || ''; });
+    const translated = await mediaLanguage.translateMediaTexts(db, log, dramaId, texts);
+    watermarkText = translated.watermark;
+    if (wantDial && mediaLanguage.isEnglishMedia(db, dramaId) && rows.some((row) => {
+      const p = dialoguePath(row);
+      return p && fs.existsSync(p) && /\p{Script=Han}/u.test(row?.dialogue || '');
+    })) return { ok: false, error: '英文成片包含已有中文对白配音，请先重新生成英文配音再合成' };
     let alignedAudioPath = null;
     let srtPath = null;
     let srtLines = [];
@@ -239,13 +257,10 @@ async function runMergedEpisodePostProcess(db, log, opts) {
 
       for (let i = 0; i < scenes.length; i++) {
         const sc = scenes[i];
-        const sbId = Number(sc.scene_id);
         const slotSec = Math.max(0.2, Number(sc.duration) || 5);
-        const row = db.prepare(
-          'SELECT dialogue, narration, audio_local_path, narration_audio_local_path FROM storyboards WHERE id = ? AND deleted_at IS NULL'
-        ).get(sbId);
+        const row = rows[i];
 
-        const narrText = (row?.narration && String(row.narration).trim()) ? String(row.narration).trim() : '';
+        const narrText = (translated[`narration_${i}`] || '').trim();
         if (wantNarr && narrText) {
           const durMs = Math.round(slotSec * 1000);
           srtLines.push(String(srtIdx++), `${formatSrtTimestamp(tMs)} --> ${formatSrtTimestamp(tMs + durMs)}`, narrText, '');
@@ -277,9 +292,10 @@ async function runMergedEpisodePostProcess(db, log, opts) {
             const segRaw = path.join(tempRoot, `narr_raw_${i}.mp3`);
             let synth;
             try {
-              synth = await ttsService.synthesize(db, log, {
+              synth = await require('./ttsService').synthesize(db, log, {
                 text: narrText,
                 storyboard_id: null,
+                drama_id: dramaId,
                 storage_base: storageRoot,
               });
             } catch (e) {
@@ -371,11 +387,12 @@ async function runMergedEpisodePostProcess(db, log, opts) {
         return { ok: false, error: '内部错误：缺少对齐音轨' };
       }
       const args = ['-y', '-i', mergedAbsPath, '-i', alignedAudioPath];
-      if (filterComplex) {
-        args.push('-filter_complex', filterComplex, '-map', '[vout]', '-map', '1:a');
-      } else {
-        args.push('-map', '0:v', '-map', '1:a');
-      }
+      const hasSourceAudio = ffprobeHasAudio(mergedAbsPath);
+      const audioFilter = hasSourceAudio
+        ? '[0:a][1:a]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,alimiter=limit=0.95[aout]' : '';
+      const filters = [filterComplex, audioFilter].filter(Boolean).join(';');
+      if (filters) args.push('-filter_complex', filters);
+      args.push('-map', filterComplex ? '[vout]' : '0:v', '-map', hasSourceAudio ? '[aout]' : '1:a');
       args.push(
         '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
         '-c:a', 'aac', '-b:a', '192k', '-movflags', '+faststart', '-shortest', outAbs
@@ -404,14 +421,6 @@ async function runMergedEpisodePostProcess(db, log, opts) {
     }
 
     const relFromRoot = path.relative(storageRoot, outAbs).replace(/\\/g, '/');
-
-    try {
-      if (fs.existsSync(mergedAbsPath) && outAbs !== mergedAbsPath) {
-        fs.unlinkSync(mergedAbsPath);
-      }
-    } catch (e) {
-      log.warn('merged post: could not remove intermediate', { error: e.message });
-    }
 
     log.info('merged post: done', { episode_id: episodeId, video: relFromRoot });
     return { ok: true, relativePath: relFromRoot };

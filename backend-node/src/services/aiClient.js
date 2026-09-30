@@ -266,7 +266,11 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
   // F2: 若传入 scene_key，优先从 ai_model_map 查找对应的模型路由配置
   let config = null;
   let routedModelOverride = null;
-  if (scene_key) {
+  if (options.config_id) {
+    config = require('./aiConfigService').getConfig(db, Number(options.config_id));
+    if (!config || !config.is_active || config.service_type !== serviceType) throw new Error('指定的文本配置不可用');
+  }
+  if (scene_key && !config) {
     const mapped = getConfigFromModelMap(db, scene_key);
     if (mapped) {
       config = mapped.config;

@@ -3,6 +3,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { dramaAPI } from '@/api/drama'
 import { storyboardsAPI } from '@/api/storyboards'
 import { taskAPI } from '@/api/task'
+import { videosAPI } from '@/api/videos'
 import { parseDramaMetadata } from '@/utils/canvasLayout'
 import { getDramaGenerationOptions } from '@/utils/canvasWorkflow'
 import { runImageStep, runVideoStep } from '@/composables/useCanvasWorkflowRunner'
@@ -213,12 +214,9 @@ export function useCanvasEpisodeGenerate(deps) {
       ElMessage.info('当前集分镜均已有视频')
       return
     }
+    let videoQuote
     try {
-      await ElMessageBox.confirm(
-        `将为 ${todo.length} 个分镜依次生视频，是否继续？`,
-        '批量生成分镜视频',
-        { type: 'info', confirmButtonText: '开始' }
-      )
+      videoQuote = await videosAPI.confirm(todo.map(sb=>({storyboard_id:sb.id,resolution:getGenOpts().videoResolution || undefined})))
     } catch {
       return
     }
@@ -232,7 +230,7 @@ export function useCanvasEpisodeGenerate(deps) {
         episodeGenProgress.value = `批量生视频 ${i + 1}/${todo.length}：分镜 #${sb.storyboard_number ?? sb.id}`
         setSbBusy(sb, 'video', `${CANVAS_NODE_STATUS_LABELS.video} ${i + 1}/${todo.length}`)
         try {
-          await runVideoStep(drama.value, sb, getGenOpts())
+          await runVideoStep(drama.value, sb, {...getGenOpts(),videoQuote})
           ok++
           await refreshCanvas(true)
         } catch (e) {

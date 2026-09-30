@@ -116,8 +116,10 @@ async function synthesizeWithOpenai(text, voice, apiKey, baseUrl, model, speed) 
  * 合成 TTS 并保存到本地文件
  * @returns {{ local_path: string, audio_url: string }}
  */
-async function synthesize(db, log, { text, storyboard_id, config, storage_base, voice_id, speed }) {
+async function synthesize(db, log, { text, storyboard_id, drama_id, config, storage_base, voice_id, speed }) {
   if (!text || !text.trim()) throw new Error('text 不能为空');
+  const dramaId = drama_id || (storyboard_id && db.prepare('SELECT e.drama_id FROM storyboards s JOIN episodes e ON e.id = s.episode_id WHERE s.id = ?').get(Number(storyboard_id))?.drama_id);
+  ({ text } = await require('./mediaLanguage').translateMediaTexts(db, log, dramaId, { text }));
   const aiConfigService = require('./aiConfigService');
   const ttsConfig = config || (() => {
     const configs = aiConfigService.listConfigs(db, 'tts');
@@ -145,7 +147,7 @@ async function synthesize(db, log, { text, storyboard_id, config, storage_base, 
       ttsModel || 'speech-02-hd'
     );
   } else if (provider === 'openai' || ttsConfig.base_url) {
-    console.log('==c sxy synthesizeWithOpenai', text, voiceId, ttsConfig.api_key, ttsConfig.base_url, ttsModel, finalSpeed);
+    log.info('OpenAI TTS request', { voiceId, model: ttsModel, speed: finalSpeed });
     audioBuffer = await synthesizeWithOpenai(
       text,
       voiceId || 'alloy',

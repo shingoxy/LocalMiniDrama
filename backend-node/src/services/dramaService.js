@@ -26,6 +26,7 @@ function parseJsonColumn(value) {
 
 function createDrama(db, log, req) {
   const now = new Date().toISOString();
+  const defaults = require('./settingsService').getGlobalSetting(db, 'creation_defaults', {}) || {};
   let meta = {};
   if (req.metadata) {
     try {
@@ -37,6 +38,7 @@ function createDrama(db, log, req) {
       meta = {};
     }
   }
+  meta = { ...defaults.metadata, ...meta };
   if (!meta.storage_folder_label) {
     meta.storage_folder_label = storageLayout.sanitizeFolderLabel(req.title || '');
   }
@@ -49,7 +51,7 @@ function createDrama(db, log, req) {
     req.title || '',
     req.description || null,
     req.genre || null,
-    req.style || 'realistic',
+    req.style || defaults.style || 'realistic',
     metadataStr,
     now,
     now
@@ -347,6 +349,9 @@ function parseStoryboardCharacters(charactersStr) {
 
 function rowToStoryboard(r) {
   return {
+    video_provider: r.video_provider, video_model: r.video_model, video_config_id: r.video_config_id,
+    h3_mode: r.h3_mode, optimized_prompt: r.optimized_prompt, user_edited: !!r.user_edited,
+    shot_intent: r.shot_intent, source_prompt_hash: r.source_prompt_hash, prompt_version: r.prompt_version,
     id: r.id,
     episode_id: r.episode_id,
     scene_id: r.scene_id,
@@ -756,7 +761,13 @@ function getVideoUrlForStoryboard(db, storyboardId, baseUrl) {
 
   // 辅助函数：构造完整 URL，优先使用本地路径（避免远程URL过期导致无法合并）
   const buildUrl = (videoUrl, localPath) => {
-    if (localPath && String(localPath).trim() && baseUrl) {
+    // storyboard.local_path can still point to its reference image. A selected local
+    // video must retain its own URL rather than being replaced by that image path.
+    if (videoUrl && String(videoUrl).startsWith('/static/')) {
+      try { return new URL(videoUrl, new URL(baseUrl).origin).toString(); }
+      catch (_) { return videoUrl; }
+    }
+    if (localPath && /\.(mp4|mov|webm)(?:$|\?)/i.test(String(localPath)) && baseUrl) {
       const base = (baseUrl || '').replace(/\/$/, '');
       const p = String(localPath).replace(/^\//, '');
       return p ? base + '/' + p : null;

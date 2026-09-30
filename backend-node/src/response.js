@@ -27,9 +27,10 @@ function successWithPagination(res, items, total, page, pageSize) {
 }
 
 function error(res, statusCode, code, message, details) {
+  const { redactSecrets } = require('./utils/redactSecrets');
   send(res, statusCode, {
     success: false,
-    error: { code, message, ...(details && { details }) },
+    error: { code, message: redactSecrets(message), ...(details && { details }) },
   });
 }
 

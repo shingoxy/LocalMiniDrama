@@ -13,7 +13,7 @@ import { dramaUsesFirstLastFrame, sbVideoFirstLastUrls } from '@/utils/storyboar
 
 async function pollTaskSimple(taskId, options = {}) {
   if (!taskId) return { status: 'failed', error: '缺少 task_id' }
-  const maxAttempts = options.maxAttempts ?? 450
+  const maxAttempts = options.maxAttempts ?? 3600
   const interval = options.interval ?? 2000
   for (let i = 0; i < maxAttempts; i++) {
     await new Promise((r) => setTimeout(r, interval))
@@ -68,7 +68,7 @@ export async function runVideoStep(drama, sb, genOpts) {
     aspect_ratio: genOpts.aspectRatio,
     resolution: genOpts.videoResolution || undefined,
     duration: sb.duration || undefined,
-  })
+  }, genOpts.videoQuote)
   if (res?.task_id) {
     const polled = await pollTaskSimple(res.task_id)
     if (polled.status !== 'completed') throw new Error(polled.error || '视频生成失败')

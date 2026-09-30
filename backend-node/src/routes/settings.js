@@ -29,7 +29,8 @@ function getGenerationSettings(db) {
     const concurrency = settingsService.getGlobalSetting(db, 'pipeline_concurrency', 3);
     const video_concurrency = settingsService.getGlobalSetting(db, 'pipeline_video_concurrency', 3);
     const video_generation_timeout_minutes = resolveVideoGenerationTimeoutMinutes(loadConfig());
-    response.success(res, { concurrency, video_concurrency, video_generation_timeout_minutes });
+    const creation_defaults = settingsService.getGlobalSetting(db, 'creation_defaults', null);
+    response.success(res, { concurrency, video_concurrency, video_generation_timeout_minutes, creation_defaults });
   };
 }
 

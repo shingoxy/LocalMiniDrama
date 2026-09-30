@@ -15,6 +15,13 @@ test('preset returns zh/en prompts', () => {
   assert.ok(m.style_prompt_en.includes('photorealistic'))
 })
 
+test('Western short drama is an additional portrait English preset', () => {
+  const option = findStyleOption('western short drama')
+  assert.equal(option.label, '欧美短剧（英文 / 竖屏）')
+  assert.match(getStylePromptEn(option.value), /American vertical short drama/)
+  assert.match(getStylePromptEn(option.value), /9:16/)
+})
+
 test('empty style clears prompts', () => {
   assert.deepEqual(stylePromptMetadataForSave(''), {
     style_prompt_zh: '',

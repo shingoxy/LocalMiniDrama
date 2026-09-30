@@ -5,6 +5,7 @@ const taskService = require('./taskService');
 const dramaService = require('./dramaService');
 const { safeParseAIJSON } = require('../utils/safeJson');
 const loadConfig = require('../config').loadConfig;
+const westernPreset = require('./westernShortDramaPreset');
 
 async function generateStory(db, log, body) {
   const premise = (body.premise || body.prompt || body.text || '').trim();
@@ -16,7 +17,9 @@ async function generateStory(db, log, body) {
   const type = body.type || null;
   const episodeCount = Math.max(1, Math.floor(Number(body.episode_count) || 1));
 
-  const systemPrompt = promptI18n.getStoryExpansionSystemPrompt(cfg, episodeCount);
+  let systemPrompt = promptI18n.getStoryExpansionSystemPrompt(cfg, episodeCount);
+  const dramaStyle = body.drama_style || (body.drama_id && dramaService.getDramaById(db, Number(body.drama_id))?.style);
+  if (dramaStyle === westernPreset.STYLE) systemPrompt += '\n\n' + westernPreset.STORY_PROMPT;
   const userPrompt = promptI18n.buildStoryExpansionUserPrompt(cfg, premise, style, type, episodeCount);
 
   // 每集约 800 字（中文）≈ 1600 token，多留余量作为最低需求；

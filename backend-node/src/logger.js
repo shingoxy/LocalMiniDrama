@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const { redactSecrets } = require('./utils/redactSecrets');
 
 // 简单 logger，和 Go 端行为接近；若设置 LOG_FILE 则同时追加到该文件（便于打包 exe 双击时查日志）
 function log(level, msg, ...args) {
@@ -10,7 +11,7 @@ function log(level, msg, ...args) {
   } else if (args.length) {
     rest = ' ' + args.map((a) => (typeof a === 'object' ? JSON.stringify(a) : String(a))).join(' ');
   }
-  const line = `${time} [${level}] ${msg}${rest}\n`;
+  const line = redactSecrets(`${time} [${level}] ${msg}${rest}\n`);
   try {
     console.log(line.trimEnd());
   } catch (_) {}

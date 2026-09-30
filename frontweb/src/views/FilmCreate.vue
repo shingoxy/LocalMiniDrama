@@ -372,10 +372,17 @@
             <el-option label="10秒/段" :value="10" />
             <el-option label="12秒/段" :value="12" />
             <el-option label="15秒/段" :value="15" />
+            <el-option v-if="activeSeedance25" label="20秒/段" :value="20" />
+            <el-option v-if="activeSeedance25" label="25秒/段" :value="25" />
+            <el-option v-if="activeSeedance25" label="30秒/段" :value="30" />
           </el-select>
           <el-select v-model="scriptLanguage" placeholder="分镜语言" clearable style="width: 105px">
             <el-option label="中文" value="zh" />
             <el-option label="英文" value="en" />
+          </el-select>
+          <el-select v-model="mediaLanguage" placeholder="成片语言" style="width: 145px" @change="() => saveProjectSettings(false)" title="控制图片文字、视频对白和成片字幕；不改变剧本语言">
+            <el-option label="成片语言：随提示词" value="auto" />
+            <el-option label="成片语言：英文" value="en" />
           </el-select>
           <StylePickerButton
             v-model="generationStyle"
@@ -531,7 +538,7 @@
                         </el-button>
                         <span v-if="char.seedance2_voice_asset?.status === 'stale'" style="font-size:11px;color:#e6a23c">需刷新</span>
                       </template>
-                      <span style="font-size:10px;color:#909399">仅 Seedance 2.0 模型生效</span>
+                      <span style="font-size:10px;color:#909399">Seedance 2.5 / 2.0 参考模式生效</span>
                     </div>
                     <div v-if="getCharAffectedStoryboards(char.id).length" class="asset-storyboard-link">
                       <span class="asl-label">影响的分镜：</span>
@@ -949,6 +956,12 @@
             <div v-for="(e, i) in batchVideoErrors" :key="i" class="batch-error-line">{{ e }}</div>
           </div>
         </div>
+        <HybridVideoToolbar
+          v-if="currentEpisodeId" ref="hybridToolbar"
+          :drama-id="Number(dramaId)" :episode-id="Number(currentEpisodeId)" :shots="storyboards"
+          :resolution="videoResolution" :busy="batchVideoRunning || pipelineRunning"
+          @state="onHybridState" @changed="onHybridChanged" @generate="onHybridGenerate"
+        />
         <div v-if="storyboardGenerating || universalOmniPolishRunning" class="storyboard-generating-tip">
           <el-icon class="is-loading"><Loading /></el-icon>
           <span v-if="universalOmniPolishRunning">
@@ -1009,6 +1022,9 @@
               <el-icon><Delete /></el-icon>
             </el-button>
           </div>
+          <HybridShotVideo :shot="sb" :models="hybridModels" :estimate="hybridEstimates[sb.id]"
+            :busy="isSbVideoGenerating(sb.id) || batchVideoRunning || pipelineRunning"
+            @changed="onHybridChanged(sb.id)" @draft="onGenerateSbVideo(sb,{local_draft:true})" />
           <div :id="'sb-' + sb.id" class="storyboard-row">
             <!-- 左：分镜脚本 -->
             <div class="sb-panel sb-script">
@@ -2647,6 +2663,9 @@ import { sceneAPI } from '@/api/scenes'
 import { taskAPI } from '@/api/task'
 import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
+import { hybridVideoAPI } from '@/api/hybridVideo'
+import HybridVideoToolbar from '@/components/HybridVideoToolbar.vue'
+import HybridShotVideo from '@/components/HybridShotVideo.vue'
 import { storyboardsAPI } from '@/api/storyboards'
 import { uploadAPI } from '@/api/upload'
 import { characterLibraryAPI } from '@/api/characterLibrary'
@@ -2730,6 +2749,7 @@ const selectedEpisodeId = ref(null)
 /** 保存剧本后用于恢复选中集（后端重插后 id 会变，用 episode_number 匹配） */
 const savedCurrentEpisodeNumber = ref(1)
 const scriptLanguage = ref('zh')
+const mediaLanguage = ref('auto')
 const scriptStoryboardStyle = ref('')
 const scriptGenerating = ref(false)
 const isStoryGenRunning = computed(() => {
@@ -2742,6 +2762,17 @@ const generationStyle = ref('')
 const customStylePrompt = ref('')
 const projectAspectRatio = ref('16:9')
 const videoClipDuration = ref(5)
+const activeVideoConfig = ref(null)
+const activeSeedance25 = computed(() => {
+  const cfg = activeVideoConfig.value
+  const model = videoModelNameFromAiConfig(cfg).toLowerCase()
+  if (/seedance[-_]?2[-_.]?5/.test(model)) return true
+  if (/seedance/.test(model)) return false
+  try {
+    const settings = typeof cfg?.settings === 'string' ? JSON.parse(cfg.settings) : cfg?.settings
+    return settings?.seedance_version === '2.5'
+  } catch (_) { return false }
+})
 
 /** 根据 value 查找样式选项对象 */
 function _findStyleOption(val) {
@@ -4591,6 +4622,8 @@ async function loadDrama() {
     }
     projectAspectRatio.value = (d.metadata && d.metadata.aspect_ratio) ? d.metadata.aspect_ratio : '16:9'
     videoClipDuration.value = (d.metadata && d.metadata.video_clip_duration) ? Number(d.metadata.video_clip_duration) : 5
+    scriptLanguage.value = d.metadata?.script_language || 'zh'
+    mediaLanguage.value = d.metadata?.media_language || (d.style === 'western short drama' ? 'en' : 'auto')
     storyboardIncludeNarration.value = !!(d.metadata && d.metadata.storyboard_include_narration)
     storyboardUniversalOmni.value = !!(d.metadata && d.metadata.storyboard_universal_omni)
     storyboardUseFirstLastFrame.value = !!(d.metadata && d.metadata.storyboard_use_first_last_frame)
@@ -4989,6 +5022,8 @@ async function saveProjectSettings(includeGenerationStyle = false) {
     story_style: storyStyle.value || undefined,
     aspect_ratio: projectAspectRatio.value || '16:9',
     video_clip_duration: videoClipDuration.value || 5,
+    script_language: scriptLanguage.value,
+    media_language: mediaLanguage.value,
     storyboard_include_narration: !!storyboardIncludeNarration.value,
     storyboard_universal_omni: !!storyboardUniversalOmni.value,
     storyboard_use_first_last_frame: !!storyboardUseFirstLastFrame.value,
@@ -6144,7 +6179,7 @@ function getSbUniversalOmniRefSlots(sb) {
   return out
 }
 
-/** 全能模式：场景/角色/物品 → 绝对 URL 列表（不含经典分镜中间主图；供可灵 Omni / 火山多图参考，最多 10，方舟侧最多取 9 张） */
+/** 全能模式：场景/角色/物品 → 绝对 URL 列表；Seedance 2.5 最多 30 张，其他模型保持原上限。 */
 function collectSbOmniReferenceAbsoluteUrls(sb) {
   if (!sb?.id) return []
   const urls = []
@@ -6163,7 +6198,7 @@ function collectSbOmniReferenceAbsoluteUrls(sb) {
   for (const p of getSbSelectedProps(sb.id)) {
     if (hasAssetImage(p)) pushAbs(assetImageUrl(p))
   }
-  return urls.slice(0, 10)
+  return urls.slice(0, activeSeedance25.value ? 30 : 10)
 }
 
 /** 非 Seedance2 全能降级：仅场景参考图（若有） */
@@ -6184,6 +6219,7 @@ const ACTIVE_VIDEO_AI_CONFIG_TTL_MS = 15000
 function invalidateActiveVideoAiConfigCache() {
   activeVideoAiConfigCache = null
   activeVideoAiConfigCacheAt = 0
+  getActiveVideoAiConfig()
 }
 
 async function getActiveVideoAiConfig() {
@@ -6200,6 +6236,7 @@ async function getActiveVideoAiConfig() {
     activeVideoAiConfigCache = null
   }
   activeVideoAiConfigCacheAt = now
+  activeVideoConfig.value = activeVideoAiConfigCache
   return activeVideoAiConfigCache
 }
 
@@ -6515,12 +6552,32 @@ async function onRegenerateLayoutDescription(sb) {
   }
 }
 
-async function onGenerateSbVideo(sb) {
+const hybridToolbar = ref(null)
+const hybridModels = ref([])
+const hybridEstimates = ref({})
+function onHybridState({models,report}) {
+  hybridModels.value=models
+  hybridEstimates.value=Object.fromEntries((report?.shots || []).map(s=>[s.storyboard_id,s]))
+}
+async function onHybridChanged(shotId) {
+  const state=await hybridVideoAPI.state(currentEpisodeId.value)
+  for (const update of state.shots) {
+    const sb=storyboards.value.find(s=>s.id===update.id)
+    if (sb) Object.assign(sb,update)
+  }
+  await hybridToolbar.value?.refresh()
+  if (shotId) await loadSingleStoryboardMedia(shotId)
+}
+async function onHybridGenerate(options) {
+  await startBatchVideoGeneration({...options,regenerate:true})
+}
+async function onGenerateSbVideo(sb, generationOptions = {}) {
   if (!dramaId.value || !sb?.id || !sbCanSubmitVideo(sb)) return
+  const selected = (await hybridVideoAPI.forecast({requests:[{storyboard_id:sb.id,resolution:videoResolution.value,local_draft:generationOptions.local_draft}]})).shots[0].selection
   const universal = isSbUniversalMode(sb.id)
-  let universalOmniApi = universal
-  if (universal) {
-    const videoCfg = await getActiveVideoAiConfig()
+  let universalOmniApi = universal && !selected.local
+  if (universal && !selected.local) {
+    const videoCfg = selected
     if (!canUseUniversalOmniVideoApi(videoCfg)) {
       try {
         await confirmUniversalNonSeedance2Video()
@@ -6533,6 +6590,10 @@ async function onGenerateSbVideo(sb) {
   const omniRefs = universalOmniApi ? collectSbOmniReferenceAbsoluteUrls(sb) : []
   const sceneOnlyRefs = universal && !universalOmniApi ? collectSbSceneOnlyReferenceAbsoluteUrls(sb) : []
   const hasClassicFrame = !!getSbFirstFrameUrl(sb)
+  if (selected.local && !hasClassicFrame) {
+    ElMessage.warning('当前 H3 Workflow 需要分镜首帧图，请先生成或上传分镜图')
+    return
+  }
   let hasAnyImage = false
   if (universalOmniApi) {
     hasAnyImage = omniRefs.length > 0
@@ -6610,7 +6671,8 @@ async function onGenerateSbVideo(sb) {
       aspect_ratio: projectAspectRatio.value || '16:9',
       resolution: videoResolution.value || undefined,
       duration: getSbVideoDurationForApi(sb),
-    })
+      local_draft: generationOptions.local_draft,
+    }, generationOptions.quote)
     if (res?.task_id) {
       const pollRes = await pollTask(res.task_id, () => loadSingleStoryboardMedia(sb.id), meta)
       if (pollRes?.status === 'failed') {
@@ -6957,7 +7019,7 @@ async function startBatchImageGeneration() {
   }
 }
 
-async function startBatchVideoGeneration() {
+async function startBatchVideoGeneration(options = {}) {
   if (!currentEpisodeId.value || batchVideoRunning.value || pipelineRunning.value) return
   batchVideoErrors.value = []
   batchVideoStopping.value = false
@@ -6968,11 +7030,15 @@ async function startBatchVideoGeneration() {
       await loadStoryboardMedia()
     }
     const boards = store.storyboards || []
+    if (!boards.length) { ElMessage.info('当前 Episode 没有分镜');return }
+    const forecast = await hybridVideoAPI.forecast({requests:boards.map(sb=>({storyboard_id:sb.id,resolution:videoResolution.value,local_draft:options.local_draft}))})
+    const selectedModels = Object.fromEntries(forecast.shots.map(s=>[s.storyboard_id,s.selection]))
     // 只处理：有参考图（经典=分镜主图；全能=场景/角色/道具，不含经典主图）且 还没有已完成视频 的分镜
     const todo = boards.filter((sb) => {
+      if (options.ids && !options.ids.includes(sb.id)) return false
       const vidList = sbVideos.value[sb.id] || []
-      if (vidList.some((v) => v.status === 'completed' && recordHasPlayableVideoUrl(v))) return false
-      if (isSbUniversalMode(sb.id)) {
+      if (!options.regenerate && vidList.some((v) => v.status === 'completed' && recordHasPlayableVideoUrl(v))) return false
+      if (isSbUniversalMode(sb.id) && !selectedModels[sb.id]?.local && canUseUniversalOmniVideoApi(selectedModels[sb.id])) {
         if (!sbCanSubmitVideo(sb)) return false
         return collectSbOmniReferenceAbsoluteUrls(sb).length > 0
       }
@@ -6982,6 +7048,9 @@ async function startBatchVideoGeneration() {
       ElMessage.info('没有需要生成视频的分镜（分镜缺少图片，或视频已全部生成）')
       return
     }
+    let confirmedQuote
+    try { confirmedQuote = await videosAPI.confirm(todo.map(sb=>({storyboard_id:sb.id,resolution:videoResolution.value || undefined,local_draft:options.local_draft}))) }
+    catch { return }
     batchVideoProgress.value = { current: 0, total: todo.length, failed: 0 }
     const contiguity = videoFrameContiguity.value
     // 连贯帧模式强制顺序（concurrency=1），普通模式并发
@@ -6994,7 +7063,7 @@ async function startBatchVideoGeneration() {
       while (videoQueueIdx < todo.length) {
         if (batchVideoStopping.value) break
         const sb = todo[videoQueueIdx++]
-        const universal = isSbUniversalMode(sb.id)
+        const universal = isSbUniversalMode(sb.id) && !selectedModels[sb.id]?.local && canUseUniversalOmniVideoApi(selectedModels[sb.id])
         const omniRefs = universal ? collectSbOmniReferenceAbsoluteUrls(sb) : []
         if (!universal && !getSbFirstFrameUrl(sb)) {
           videoDoneCount++
@@ -7046,7 +7115,7 @@ async function startBatchVideoGeneration() {
           const res = await videosAPI.create({
             drama_id: dramaId.value,
             storyboard_id: sb.id,
-            prompt: buildSbVideoPromptForApi(sb),
+            prompt: buildSbVideoPromptForApi(sb,{preferClassicPrompt:isSbUniversalMode(sb.id) && !universal}),
             image_url: vFirst || undefined,
             first_frame_url: vFirst,
             last_frame_url: vLast,
@@ -7055,7 +7124,8 @@ async function startBatchVideoGeneration() {
             aspect_ratio: projectAspectRatio.value || '16:9',
             resolution: videoResolution.value || undefined,
             duration: getSbVideoDurationForApi(sb),
-          })
+            local_draft: options.local_draft,
+          }, confirmedQuote)
           if (res?.task_id) {
             const meta = buildSbGenMeta(sb, GEN_RESOURCE.SB_VIDEO, '分镜视频')
             const pollRes = await pollTask(res.task_id, () => loadSingleStoryboardMedia(sb.id), meta)
@@ -7200,7 +7270,7 @@ function pollTaskWithPause(taskId, onDone, meta = {}) {
   if (trackInStore && taskId) {
     genStore.markRunning({ ...resolvedMeta, taskId })
   }
-  const maxAttempts = 450  // 450 × 2s = 15 分钟
+  const maxAttempts = 3600  // 3600 × 2s = 120 分钟，覆盖本地 H3
   const interval = 2000
   let attempts = 0
   return new Promise((resolve, reject) => {
@@ -8153,6 +8223,7 @@ function applyRouteToStore() {
     storyStyle.value = ''
     storyType.value = ''
     scriptLanguage.value = 'zh'
+    mediaLanguage.value = 'auto'
     scriptStoryboardStyle.value = ''
     generationStyle.value = ''
     customStylePrompt.value = ''
@@ -8161,6 +8232,7 @@ function applyRouteToStore() {
 
 onMounted(async () => {
   loadPipelineConcurrency()
+  getActiveVideoAiConfig()
   applyRouteToStore()
 })
 

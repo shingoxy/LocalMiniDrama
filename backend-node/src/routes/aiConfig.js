@@ -4,7 +4,7 @@ const response = require('../response');
 function list(db) {
   return (req, res) => {
     const list = aiConfigService.listConfigs(db, req.query.service_type);
-    response.success(res, list);
+    response.success(res, list.map((config) => ({ ...config, api_key: '', has_api_key: !!config.api_key })));
   };
 }
 
@@ -103,9 +103,11 @@ function bulkUpdateKey(db, log, cfg) {
   };
 }
 
-function testConnection(log) {
+function testConnection(db, log) {
   return async (req, res) => {
-    const body = req.body || {};
+    const saved = req.body?.config_id ? aiConfigService.getConfig(db, Number(req.body.config_id)) : null;
+    const body = { ...saved, ...req.body };
+    if (!body.api_key && saved) body.api_key = saved.api_key;
     if (!body.base_url || !body.api_key) {
       return response.badRequest(res, '缺少 base_url 或 api_key');
     }
@@ -188,9 +190,18 @@ module.exports = function aiConfigRoutes(db, log, cfg) {
     get: get(db),
     vendorLock: vendorLock(cfg),
     create: create(db, log, cfg),
+    applyWesternPreset: (req, res) => {
+      if (aiConfigService.getVendorLockStatus(cfg).enabled) return response.badRequest(res, '当前为厂商锁定模式，不允许添加配置');
+      try {
+        response.success(res, require('../services/westernShortDramaPreset').applyPreset(db, log));
+      } catch (err) {
+        log.errorw('Apply western short drama preset failed', { error: err.message });
+        response.internalError(res, '创建欧美短剧配置模板失败');
+      }
+    },
     update: update(db, log, cfg),
     delete: remove(db, log, cfg),
-    testConnection: testConnection(log),
+    testConnection: testConnection(db, log),
     listJimeng2MaterialAssets: listJimeng2MaterialAssets(log),
     modelArkAsset: modelArkAsset(log),
     bulkUpdateKey: bulkUpdateKey(db, log, cfg),

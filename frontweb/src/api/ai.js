@@ -10,6 +10,9 @@ export const aiAPI = {
   create(body) {
     return request.post('/ai-configs', body)
   },
+  applyWesternShortDramaPreset() {
+    return request.post('/ai-configs/presets/western-short-drama')
+  },
   update(id, body) {
     return request.put(`/ai-configs/${id}`, body)
   },

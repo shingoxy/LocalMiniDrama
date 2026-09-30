@@ -23,6 +23,9 @@
                 <el-icon><MagicStick /></el-icon>
                 一键配置火山
               </el-button>
+              <el-button type="primary" plain :loading="westernPresetSaving" @click="applyWesternPreset">
+                一键配置欧美短剧
+              </el-button>
               <el-button type="success" plain @click="openOneKeyAgnes">
                 <el-icon><MagicStick /></el-icon>
                 一键配置 Agnes
@@ -325,7 +328,7 @@
           <el-select v-model="form.api_protocol" style="width: 100%" placeholder="选择接口规范（自定义厂商必选）" clearable>
             <el-option label="OpenAI 兼容（大多数中转站默认）" value="openai" />
             <el-option label="火山引擎（豆包 Seedream / Seedance）" value="volcengine" />
-            <el-option label="火山即梦 Seedance 全能（方舟多图参考，Seedance 2.0 等）" value="volcengine_omni" />
+            <el-option label="火山即梦 Seedance 全能（Seedance 2.5 / 2.0）" value="volcengine_omni" />
             <el-option label="通义万象 DashScope" value="dashscope" />
             <el-option label="Google Gemini（图片 / Veo 视频）" value="gemini" />
             <el-option label="Sora 中转站（multipart/form-data，seconds+size）" value="sora" />
@@ -444,7 +447,7 @@ input_reference = (图片文件，可选)</pre>
     { "type": "image_url", "image_url": { "url": "https://..." }, "role": "reference_image" }
   ],
   "ratio": "9:16", "duration": 8, "watermark": false }</pre>
-                  <b>说明：</b>全能模式下列均为参考图（场景、角色…），每张均 <code>role: reference_image</code>；最多 9 张，时长 Seedance 2.x 按 4–15 秒吸附。
+                  <b>说明：</b>参考图使用 <code>role: reference_image</code>；2.0 最多 9 张、4–15 秒，2.5 最多 30 张、4–30 秒，均支持 -1 智能时长。2.5 支持 480p / 720p / 1080p；首尾帧与参考图互斥，首尾帧画幅自动使用 adaptive 并跟随首帧。
                 </div>
               </el-collapse-item>
               <el-collapse-item name="dashscope-vid">
@@ -820,9 +823,13 @@ input_reference = (图片文件，可选)</pre>
               <el-option label="max" value="max" />
             </el-select>
           </div>
-          <p class="field-tip">官方旧模型名将在 2026-07-24 废弃；新配置建议使用 deepseek-v4-flash 或 deepseek-v4-pro。</p>
+          <p class="field-tip">推荐 deepseek-flash，也可选 deepseek-v4-pro；模型名可自行修改，旧别名继续保留。</p>
         </el-form-item>
         </template>
+        <el-form-item v-if="form.service_type === 'video' && form.api_protocol === 'volcengine_omni'" label="同步音频">
+          <el-switch v-model="form.seedance_generate_audio" />
+          <p class="field-tip">开启后由 Seedance 生成同步人声、音效和音乐；关闭后输出无声视频。</p>
+        </el-form-item>
         <el-form-item>
           <template #label>
             <span class="form-label-tip">优先级
@@ -1185,6 +1192,7 @@ const form = ref({
   default_model: '',
   deepseek_thinking: 'disabled',
   deepseek_reasoning_effort: 'high',
+  seedance_generate_audio: true,
   priority: 0,
   is_default: false,
   // 可灵 Omni 官方 AK/SK（存 settings，后端生成 JWT）
@@ -1286,6 +1294,7 @@ const testError = ref('')
 const oneKeyTongyiVisible = ref(false)
 const oneKeyTongyiKey = ref('')
 const oneKeyTongyiSaving = ref(false)
+const westernPresetSaving = ref(false)
 const oneKeyVolcVisible = ref(false)
 const oneKeyVolcKey = ref('')
 const oneKeyVolcSaving = ref(false)
@@ -1300,12 +1309,12 @@ const providerConfigs = {
     { id: 'volcengine', name: '火山引擎', models: ['deepseek-v3-2-251201', 'doubao-1-5-pro-32k-250115', 'kimi-k2-thinking-251104'] },
     // { id: 'chatfire', name: 'Chatfire', models: ['gemini-3-flash-preview', 'claude-sonnet-4-5-20250929', 'doubao-seed-1-8-251228'] },
     { id: 'gemini', name: 'Google Gemini', models: ['gemini-2.5-pro', 'gemini-3-flash-preview'] },
-    { id: 'deepseek', name: 'DeepSeek', models: ['deepseek-v4-flash', 'deepseek-v4-pro'] },
+    { id: 'deepseek', name: 'DeepSeek（官方推荐）', models: ['deepseek-flash', 'deepseek-v4-pro', 'deepseek-v4-flash'] },
     { id: 'qwen', name: '通义千问', models: ['qwen3-max', 'qwen-plus', 'qwen-flash'] },
     { id: 'agnes', name: 'Agnes AI', models: ['agnes-3.0-flash', 'agnes-2.5-flash', 'agnes-2.5-pro', 'agnes-2.0-flash'] }
   ],
   image: [
-    { id: 'volcengine', name: '火山引擎', models: ['doubao-seedream-4-5-251128', 'doubao-seedream-4-0-250828'] },
+    { id: 'volcengine', name: '火山引擎', models: ['doubao-seedream-5-0-pro-260628', 'doubao-seedream-4-5-251128', 'doubao-seedream-4-0-250828'] },
     { id: 'kling', name: '可灵 Kling', models: ['kling-image', 'kling-omni-image'] },
     { id: 'nano_banana', name: 'NanoBanana', models: ['nano-banana-2', 'nano-banana-pro', 'nano-banana'] },
     // { id: 'chatfire', name: 'Chatfire', models: ['nano-banana-pro', 'doubao-seedream-4-5-251128', 'qwen-image'] },
@@ -1317,7 +1326,7 @@ const providerConfigs = {
   ],
   storyboard_image: [
     { id: 'dashscope', name: '通义万象', models: ['wan2.6-image', 'qwen-image-edit-plus-2026-01-09', 'qwen-image-edit-plus', 'qwen-image-edit-max'] },
-    { id: 'volcengine', name: '火山引擎', models: ['doubao-seedream-4-5-251128', 'doubao-seedream-4-0-250828'] },
+    { id: 'volcengine', name: '火山引擎', models: ['doubao-seedream-5-0-pro-260628', 'doubao-seedream-4-5-251128', 'doubao-seedream-4-0-250828'] },
     { id: 'kling', name: '可灵 Kling', models: ['kling-image', 'kling-omni-image'] },
     { id: 'nano_banana', name: 'NanoBanana', models: ['nano-banana-2', 'nano-banana-pro', 'nano-banana'] },
     // { id: 'chatfire', name: 'Chatfire', models: ['nano-banana-pro', 'doubao-seedream-4-5-251128', 'qwen-image'] },
@@ -1330,7 +1339,7 @@ const providerConfigs = {
     { id: 'ffir', name: '飞儿API / 可灵 Omni-Video (ffir.cn)', models: ['kling-video-o1', 'kling-v3-omni'] },
     { id: 'kling', name: '可灵 Kling', models: ['kling-omni-video', 'kling-video', 'kling-motion-control'] },
     { id: 'vidu', name: 'Vidu', models: ['viduq2', 'viduq2-pro', 'viduq2-turbo', 'viduq3-pro'] },
-    { id: 'volces', name: '火山引擎', models: ['doubao-seedance-2-0-260128', 'doubao-seedance-2-0-fast-260128', 'doubao-seedance-1-5-pro-251215', 'doubao-seedance-1-0-lite-i2v-250428', 'doubao-seedance-1-0-lite-t2v-250428', 'doubao-seedance-1-0-pro-250528', 'doubao-seedance-1-0-pro-fast-251015'] },
+    { id: 'volces', name: '火山引擎', models: ['doubao-seedance-2-5-260628', 'doubao-seedance-2-0-260128', 'doubao-seedance-2-0-fast-260128', 'doubao-seedance-1-5-pro-251215', 'doubao-seedance-1-0-lite-i2v-250428', 'doubao-seedance-1-0-lite-t2v-250428', 'doubao-seedance-1-0-pro-250528', 'doubao-seedance-1-0-pro-fast-251015'] },
     // { id: 'chatfire', name: 'Chatfire', models: ['doubao-seedance-1-5-pro-251215', 'doubao-seedance-1-0-lite-i2v-250428', 'doubao-seedance-1-0-lite-t2v-250428', 'doubao-seedance-1-0-pro-250528', 'doubao-seedance-1-0-pro-fast-251015', 'sora-2', 'sora-2-pro'] },
     { id: 'minimax_h3', name: 'MiniMax H3', models: ['MiniMax-H3'] },
     { id: 'minimax', name: 'MiniMax 海螺', models: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02'] },
@@ -1513,7 +1522,7 @@ const endpointPreviewInfo = computed(() => {
       submitPath = '/api/v1/services/aigc/multimodal-generation/generation'
     } else if (proto === 'gemini' || p === 'gemini') {
       const m = form.value.default_model || '{模型名}'
-      submitPath = `/v1beta/models/${m}:generateContent?key=***`
+      submitPath = `/v1beta/models/${m}:generateContent  （API Key 放 header: x-goog-api-key）`
       return { submit: base + submitPath, query: null, isAuto: true, isGemini: true }
     } else if (proto === 'nano_banana' || p === 'nano_banana') {
       submitPath = '/v1/images/generations'  // nano_banana base_url 无 /v1
@@ -1647,6 +1656,17 @@ function onProviderChange(providerId) {
   }
   // 自动填充接口规范
   form.value.api_protocol = providerProtocolMap[providerId] || (st === 'text' ? '' : 'openai')
+  if (st === 'video' && providerId === 'volces') form.value.api_protocol = 'volcengine_omni'
+  if (st === 'text' && (providerId === 'gemini' || providerId === 'google')) {
+    form.value.base_url = 'https://generativelanguage.googleapis.com/v1beta/openai'
+    form.value.api_protocol = 'openai'
+    form.value.endpoint = '/chat/completions'
+    form.value.query_endpoint = ''
+  }
+  if (st !== 'text' && (providerId === 'gemini' || providerId === 'google')) {
+    form.value.endpoint = ''
+    form.value.query_endpoint = ''
+  }
   if (st === 'video' && providerId === 'jimeng_ai_api') {
     form.value.endpoint = ''
     form.value.query_endpoint = ''
@@ -1762,6 +1782,7 @@ function resetForm() {
     default_model: '',
     deepseek_thinking: 'disabled',
     deepseek_reasoning_effort: 'high',
+    seedance_generate_audio: true,
     priority: 0,
     is_default: true,  // 新增时默认勾选「设为默认」，便于理解当前会使用哪条配置
     voice_id: '',
@@ -1778,7 +1799,8 @@ function openAdd() {
   dialogVisible.value = true
 }
 
-function openEdit(row) {
+async function openEdit(row) {
+  row = await aiAPI.get(row.id)
   editingId.value = row.id
   const model = Array.isArray(row.model) ? row.model : (row.model ? [row.model] : [])
   const modelList = model.map((m) => String(m).trim()).filter(Boolean)
@@ -1817,6 +1839,7 @@ function openEdit(row) {
     default_model: defaultInList ? row.default_model : (modelList[0] || ''),
     deepseek_thinking: deepseekSettings.thinking,
     deepseek_reasoning_effort: deepseekSettings.effort,
+    seedance_generate_audio: parseSettings(row.settings).generate_audio !== false,
     priority: row.priority ?? 0,
     is_default: !!row.is_default,
     voice_id,
@@ -1873,6 +1896,12 @@ async function submit() {
         delete baseS.deepseek_reasoning_effort
       }
       settings = Object.keys(baseS).length ? JSON.stringify(baseS) : null
+    }
+    if (form.value.service_type === 'video' && form.value.api_protocol === 'volcengine_omni') {
+      const prev = editingId.value ? list.value.find((r) => r.id === editingId.value) : null
+      const baseS = parseSettings(prev?.settings)
+      baseS.generate_audio = form.value.seedance_generate_audio !== false
+      settings = JSON.stringify(baseS)
     }
     const payload = {
       service_type: form.value.service_type,
@@ -1989,6 +2018,7 @@ async function openTest(row) {
   testServiceType.value = row.service_type || 'text'
   try {
     await aiAPI.testConnection({
+      config_id: row.id,
       base_url: row.base_url,
       api_key: row.api_key,
       model: Array.isArray(row.model) ? row.model[0] : row.model,
@@ -2077,6 +2107,17 @@ async function submitOneKeyTongyi() {
 function openOneKeyVolc() {
   oneKeyVolcKey.value = ''
   oneKeyVolcVisible.value = true
+}
+
+async function applyWesternPreset() {
+  westernPresetSaving.value = true
+  try {
+    await aiAPI.applyWesternShortDramaPreset()
+    ElMessage.success('已创建欧美短剧空 Key 模板并设为默认；新项目采用 9:16 和欧美短剧 Prompt。请编辑填写 DeepSeek Key 和 Ark Key。')
+    await loadList()
+  } finally {
+    westernPresetSaving.value = false
+  }
 }
 
 async function submitOneKeyVolc() {

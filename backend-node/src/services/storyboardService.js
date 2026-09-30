@@ -156,6 +156,9 @@ function getStoryboardById(db, id) {
   } catch (_) {}
   return {
     id: r.id,
+    video_provider: r.video_provider, video_model: r.video_model, video_config_id: r.video_config_id,
+    h3_mode: r.h3_mode, optimized_prompt: r.optimized_prompt, user_edited: !!r.user_edited,
+    shot_intent: r.shot_intent, source_prompt_hash: r.source_prompt_hash, prompt_version: r.prompt_version,
     episode_id: r.episode_id,
     scene_id: r.scene_id,
     storyboard_number: r.storyboard_number,

@@ -25,3 +25,27 @@ frontweb-edu
 .superpowers
 build_edu
 node_modules
+
+# Local workstation state (contains API credentials and private media)
+backend-node/configs/config.yaml
+backend-node/config.yaml
+backend-node/configs/ai-configs*.json
+**/data/
+**/logs/
+**/cache/
+**/.env
+**/.env.local
+**/*.db-wal
+**/*.db-shm
+frontweb/dist/
+desktop/backend-app/
+desktop/frontweb-dist/
+desktop/release/
+.local/
+backup/
+ai-configs*.json
+
+# Keep the H3 source-workflow export utility, while other local scripts stay ignored.
+!backend-node/scripts/
+backend-node/scripts/*
+!backend-node/scripts/import-h3-workflow.cjs

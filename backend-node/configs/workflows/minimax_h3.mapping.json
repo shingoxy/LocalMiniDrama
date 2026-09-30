@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "engine": "minimax-h3",
+  "mode": "I2VA",
+  "supported_modes": [
+    "I2VA"
+  ],
+  "source_file": "图+文-视频生成-MinMaxH3-Auto短剧.json",
+  "source_sha256": "b9e80159a663822ceb35d8ae470d6cce70621130c1c19dc6a530769a7a05befb",
+  "native_fps": 24,
+  "frame_grid": {
+    "block": 17,
+    "offset": 5
+  },
+  "fields": {
+    "prompt": {
+      "node": "105_104",
+      "input": "prompt"
+    },
+    "reference_image": {
+      "node": "114",
+      "input": "image"
+    },
+    "first_frame": {
+      "node": "114",
+      "input": "image"
+    },
+    "last_frame": null,
+    "duration": {
+      "node": "105_111",
+      "input": "value"
+    },
+    "frames": {
+      "node": "105_104",
+      "input": "length"
+    },
+    "fps": {
+      "node": "105_91",
+      "input": "fps"
+    },
+    "width": {
+      "node": "105_104",
+      "input": "width"
+    },
+    "height": {
+      "node": "105_104",
+      "input": "height"
+    },
+    "seed": {
+      "node": "105_15",
+      "input": "noise_seed"
+    },
+    "audio": null,
+    "output": {
+      "node": "92",
+      "input": "filename_prefix",
+      "media_keys": [
+        "images",
+        "videos",
+        "gifs"
+      ]
+    }
+  },
+  "model_nodes": [
+    "105_11",
+    "105_24",
+    "105_6",
+    "105_13",
+    "105_141",
+    "105_144",
+    "105_145"
+  ],
+  "notes": "Saved current graph; first image is resized as in the original graph, dimensions follow that image. Native audio is generated, external audio/last frame are not connected."
+}

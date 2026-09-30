@@ -6,6 +6,7 @@
  * 若修改前端选项，请同步更新本文件。
  */
 const PRESETS = [
+  ['western short drama', '欧美竖屏短剧，真实现代美国生活，自然表演，紧凑构图，电影灯光，9:16 竖屏', 'American vertical short drama, contemporary US settings, natural performances, tight framing, cinematic lighting, 9:16 portrait composition'],
   ['realistic', '超写实摄影风格，8K超清细节，精准自然光照，真实皮肤纹理，专业摄影机拍摄，RAW原片质感，超高清锐度，人物面部毛孔清晰可见', 'photorealistic, ultra-detailed, 8k uhd, sharp focus, natural lighting, real skin texture, hyperrealism, professional photography, RAW photo'],
   ['cinematic', '电影级大片画面，变形镜头压缩感，胶片颗粒质感，伦勃朗式戏剧性布光，浅景深虚化背景，专业调色风格，史诗级构图，35mm胶片美学，宽画幅银幕比例', 'cinematic movie still, anamorphic lens, film grain, dramatic rembrandt lighting, shallow depth of field, color graded, epic composition, professional cinematography, 35mm film, widescreen'],
   ['documentary', '纪录片摄影风格，自然可用光源，抓拍式真实瞬间，手持摄影机晃动感，新闻摄影美学，粗粝真实质感，颗粒感胶片，非摆拍自然状态', 'documentary photography style, natural available light, candid authentic moment, handheld camera look, photojournalism, raw gritty realism, grain texture, unposed'],

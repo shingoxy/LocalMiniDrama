@@ -345,8 +345,9 @@ function parseSettingsJson(raw) {
   }
 }
 
-function loadFromSavedRow(row) {
+async function loadFromSavedRow(row) {
   if (!row) return
+  row = await aiAPI.get(row.id)
   savedConfigId.value = row.id
   baseUrl.value = (row.base_url || '').replace(/\/$/, '')
   apiKey.value = row.api_key || ''
@@ -473,9 +474,9 @@ function extractRows(resp) {
 const groupRows = computed(() => extractRows(lastListGroupsPayload.value))
 const assetRows = computed(() => extractRows(lastListAssetsPayload.value))
 
-function onFillFromSaved(id) {
+async function onFillFromSaved(id) {
   if (id == null || id === '') return
-  const c = (props.configs || []).find((x) => x.id === id)
+  const c = await aiAPI.get(id)
   if (!c) return
   baseUrl.value = (c.base_url || '').replace(/\/$/, '')
   apiKey.value = c.api_key || ''

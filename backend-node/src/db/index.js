@@ -12,7 +12,8 @@ function getDb(config) {
     fs.mkdirSync(dir, { recursive: true });
   }
   db = new Database(dbPath, {
-    verbose: config.type === 'sqlite' && process.env.DEBUG ? console.log : undefined,
+    verbose: config.type === 'sqlite' && process.env.DEBUG
+      ? (sql) => console.log(require('../utils/redactSecrets').redactSecrets(sql)) : undefined,
   });
   db.pragma('journal_mode = WAL');
   db.pragma('busy_timeout = 5000');

@@ -365,6 +365,7 @@ import { propLibraryAPI } from '@/api/propLibrary'
 import AIConfigContent from '@/components/AIConfigContent.vue'
 import { uploadAPI } from '@/api/upload'
 import { aiAPI } from '@/api/ai'
+import { generationSettingsAPI } from '@/api/prompts'
 import { imagesAPI } from '@/api/images'
 import { taskAPI } from '@/api/task'
 import { getStyleLabel } from '@/constants/styleOptions'
@@ -667,7 +668,11 @@ function totalStoryboards(d) {
   return (d.episodes || []).reduce((sum, ep) => sum + (ep.storyboards?.length || 0), 0)
 }
 
-function goNewProject() {
+async function goNewProject() {
+  try {
+    const settings = await generationSettingsAPI.get()
+    newForm.value.aspect_ratio = settings.creation_defaults?.metadata?.aspect_ratio || '16:9'
+  } catch (_) { /* 保持现有默认画幅 */ }
   showNewDialog.value = true
 }
 

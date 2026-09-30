@@ -5,12 +5,15 @@ app:
   language: zh
 server:
   port: 5679
-  host: 0.0.0.0
+  host: 127.0.0.1
   cors_origins:
-    - http://localhost:3012
+    - http://127.0.0.1:3013
+    - http://localhost:3013
+    - http://127.0.0.1:5679
+    - http://localhost:5679
   read_timeout: 600
   write_timeout: 600
-  insecure_tls: true
+  insecure_tls: false
 database:
   type: sqlite
   path: ./data/drama_generator.db
@@ -40,8 +43,10 @@ vendor_lock:
   enabled: false
   config_file: ai-configs-qudao.json
 image_proxy:
+  enabled: false
+  use_for_gemini: false
   expire_hours: 2   # 按图床实际 TTL 调整
-  use_for_video: true
+  use_for_video: false
   # 图床上传超时（秒），避免网络不通时长时间卡住
   upload_timeout_seconds: 180
   upload_max_attempts: 2

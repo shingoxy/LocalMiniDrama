@@ -1,334 +1,230 @@
-<div align="center">
+# LocalMiniDrama · Hybrid Local + Cloud
 
-# 🎬 本地短剧助手
+本地短剧制作工具：从 Story、Character、Scene、Storyboard 到逐镜头视频生成与 FFmpeg 合成。项目与素材保存在本机，每个 Shot 可以独立选择 Local MiniMax H3 或已配置的云视频模型，同一 Episode 可以混合使用多个 Provider。
 
-**本地 AI 短剧 & 漫剧生成工具 —— 下载即用，完全开源，数据不出本机**
+增强版本仓库：[shingoxy/LocalMiniDrama](https://github.com/shingoxy/LocalMiniDrama)。
 
-*LocalMiniDrama · AI-powered short drama creator*
+## Upstream & Credits
 
-[![version](https://img.shields.io/badge/version-1.2.8-blue?style=flat-square)](https://github.com/xuanyustudio/LocalMiniDrama/releases)
-[![license](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
-[![platform](https://img.shields.io/badge/platform-Windows-lightgrey?style=flat-square)](#-快速开始)
-[![stack](https://img.shields.io/badge/Vue3%20%2B%20Node.js%20%2B%20Electron-informational?style=flat-square)](#-项目架构)
-[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](https://github.com/xuanyustudio/LocalMiniDrama/pulls)
+本项目基于 [LocalMiniDrama](https://github.com/xuanyustudio/LocalMiniDrama) 进行二次开发。感谢原作者 **xuanyustudio** 及原项目贡献者提供 Short Drama 基础架构、Story / Character / Scene / Storyboard、AI Provider、Video Pipeline、FFmpeg Compose，以及 Web / Desktop 基础。
 
-**[English](docs/en.md) · 简体中文 · [作者故事](docs/story.md)**
+本 fork 在这些基础上扩展 ComfyUI、MiniMax H3、Hybrid Local + Cloud Video、Per-shot Video Model Selection、Provider-specific Prompt Adapter、DeepSeek H3 Prompt Optimization 和 Cost Engine。以上增强功能属于本 fork 的扩展，不代表上游原版的功能或验证状态。
 
-[![GitHub](https://img.shields.io/badge/GitHub-xuanyustudio%2FLocalMiniDrama-181717?logo=github&style=flat-square)](https://github.com/xuanyustudio/LocalMiniDrama)
-[![Gitee](https://img.shields.io/badge/Gitee-bi__shang__a%2Flocalminidrama-C71D23?logo=gitee&style=flat-square)](https://gitee.com/bi_shang_a/localminidrama)
-[![AtomGit](https://img.shields.io/badge/AtomGit-xuanyustudio%2FLocalMiniDrama-0052D9?style=flat-square)](https://atomgit.com/xuanyustudio/LocalMiniDrama)
+原项目 MIT License 与版权声明完整保留，见 [LICENSE](LICENSE)。
 
-[**⬇️ 下载 Release**](https://github.com/xuanyustudio/LocalMiniDrama/releases) · [**🚀 快速开始**](#-快速开始) · [**📖 配置 AI**](docs/configuration.md) · [**🗺 画布文档**](docs/plans/2026-06-15-drama-canvas-workflow-plan.md)
+## 当前功能
 
-</div>
+| 制作环节 | 功能 |
+| --- | --- |
+| 剧本与项目 | 项目、剧集管理，剧本生成与编辑，角色、场景、道具提取 |
+| 视觉资产 | 角色图、场景图、道具图、分镜图、参考帧、素材库 |
+| Storyboard | 列表与画布，经典分镜与全能分镜，提示词编辑、批量生成 |
+| AI Provider | 沿用现有文本、图片、视频接口；包括 DeepSeek、Seedream、Seedance、Kling 等配置与协议 |
+| 混合视频 | 每个 Shot 单独选模型，项目默认、整集与多选批量设置，按 Shot 路由生成 |
+| 本地 H3 | 直接连接现有 ComfyUI，提交 Workflow，Queue / Progress / History / Cancel，取回 MP4 |
+| Prompt Adapter | Universal Shot Intent，DeepSeek 转换 H3 Prompt，缓存与手工编辑保护 |
+| 成本管理 | 模型价格、月费分摊、重试预算、本机耗时、电费、单集与整季预测 |
+| 最终合成 | 复用已有 FFmpeg Pipeline、字幕、音频、水印与视频合成 |
 
----
+云模型列表来自当前启用的 AI 配置，实际可用模型及权限以账户和 Provider 为准。关闭或删除某个配置会使引用它的 Shot 报错，需要手动重新选择。
 
-<table>
-<tr>
-<td width="25%" align="center"><b>🔒 本地优先</b><br/>SQLite + 本地文件，素材不上云</td>
-<td width="25%" align="center"><b>🎬 全流程</b><br/>剧本 → 角色/场景 → 分镜 → 视频合成</td>
-<td width="25%" align="center"><b>🤖 多模型</b><br/>通义 / 火山 / 可灵 / Gemini 等</td>
-<td width="25%" align="center"><b>🗺 双视图</b><br/>列表精细编辑 + 画布批量编排</td>
-</tr>
-</table>
+## 核心增强与 Architecture
 
-市面上 AI 短剧工具不少，但真正能**本地离线运行、开箱即用、素材不上云**的几乎没有。  
-本项目用纯 JavaScript 从零搭建，接入你自己的 AI API，打开即可生成完整 AI 短剧。
-
-> ✅ 无订阅费 · ✅ 数据本地存储 · ✅ 支持多家 AI 服务商 · ✅ 完全开源可二次开发
-
----
-
-## 📌 最新动态（v1.2.8）
-
-- 🆕 **Agnes AI 接入**：文本 / 图片 / 视频一键配置，一个 Key 覆盖全流程
-- 🆕 **画布模式增强**：剧本节点、右键菜单、浮动工具栏、画布内新建/删除/整集生成
-- 🆕 **ModelArk 私有资产库**：SD2 角色认证对接火山方舟资产组，AK/SK 与 Bearer 双鉴权
-- 🔧 **图床可配置**：`upload_url` / 超时（默认 180s）/ 重试次数写入 `config.yaml`；缓存 URL 失效自动重传
-- 🔧 **提示词优化** · **分镜图片数量上限修复**
-
-完整记录 → **[CHANGELOG.md](CHANGELOG.md)**
-
----
-
-## 目录
-
-- [界面预览](#-界面预览)
-- [核心功能](#-核心功能)
-- [快速开始](#-快速开始)
-- [AI 服务商](#-ai-服务商支持)
-- [项目架构](#-项目架构)
-- [后续计划](#-后续计划-roadmap)
-- [参与贡献](#-参与贡献)
-- [联系社区](#-联系--社区)
-
----
-
-## 📸 界面预览
-
-<div align="center">
-  <img src="项目截图/首页截图.png" alt="首页 · 项目列表" width="960"/><br/>
-  <sub>首页 · 项目卡片一览，亮色模式</sub>
-</div>
-
-<br/>
-
-<div align="center">
-  <img src="项目截图/画布模式.png" alt="画布工作流 · 分镜流水线" width="960"/><br/>
-  <sub>🆕 画布模式 · 分镜流水线可视化 · 节点内编辑/生成 · 工作流整组重跑</sub>
-</div>
-
-<br/>
-
-<table>
-  <tr>
-    <td align="center"><img src="项目截图/武侠.png" alt="剧集管理页" width="480"/><br/><sub>剧集管理 · 分集 + 资源库</sub></td>
-    <td align="center"><img src="项目截图/武侠分镜.png" alt="分镜编辑页" width="480"/><br/><sub>分镜制作 · 图片 + 视频一键生成</sub></td>
-  </tr>
-  <tr>
-    <td align="center"><img src="项目截图/新版本4宫格分镜.png" alt="角色管理页" width="480"/><br/><sub>角色生成 · AI 自动提取并生成角色形象图</sub></td>
-    <td align="center"><img src="项目截图/专业分镜.png" alt="专业分镜参数" width="480"/><br/><sub>分镜制作 · 专业视频参数（景别 / 运镜 / 灯光 / 景深）</sub></td>
-  </tr>
-  <tr>
-    <td align="center" colspan="2"><img src="项目截图/本剧场景库.png" alt="本剧场景库" width="720"/><br/><sub>场景库 · 一键「加入本集」，复用已有场景素材</sub></td>
-  </tr>
-</table>
-
----
-
-## 🎬 AI 生成实拍效果
-
-> 以下 3 段视频由**本软件自动工作流选择即梦 1.0**生成，展示连续分镜下角色外貌一致性。
-
-<table>
-  <tr>
-    <td align="center">
-      <video src="项目截图/1.mp4" controls width="300"></video><br/>
-      <sub>分镜 1 · 即梦 1.0</sub>
-    </td>
-    <td align="center">
-      <video src="项目截图/2.mp4" controls width="300"></video><br/>
-      <sub>分镜 2 · 服装一致</sub>
-    </td>
-    <td align="center">
-      <video src="项目截图/3.mp4" controls width="300"></video><br/>
-      <sub>分镜 3 · 人物统一</sub>
-    </td>
-  </tr>
-</table>
-
-> 💡 同时支持火山 **Seedance 2.0**、通义万相、Vidu、可灵 Kling（含 Omni）等，模型越新效果通常越好。
-
----
-
-## ✨ 核心功能
-
-<details open>
-<summary><b>🔄 完整创作流程（点击展开/收起）</b></summary>
-
-| 步骤 | 功能 | 说明 |
-|:----:|------|------|
-| 1 | **故事生成** | 输入梗概 + 风格，AI 自动生成多集剧本 |
-| 2 | **剧本编辑** | 分集管理，剧本文本可自由编辑 |
-| 3 | **角色生成** | AI 提取角色列表，逐个生成角色形象图 |
-| 4 | **场景生成** | 从剧本自动提取场景，生成场景背景图 |
-| 5 | **道具生成** | 从剧本提取/手动添加道具，生成道具图 |
-| 6 | **分镜生成** | 按集自动生成分镜脚本（含景别/运镜/台词） |
-| 7 | **图片/视频生成** | 逐镜生成静帧图与视频片段 |
-| 8 | **合成视频** | 所有分镜视频自动合成为完整剧集文件 |
-
-</details>
-
-<details>
-<summary><b>⚡ 一键流水线 · 项目管理 · 分镜编辑</b></summary>
-
-- **一键生成 / 补全并生成**：从角色到合成视频全自动；智能跳过已有内容
-- **失败自动重试**：每步最多 3 次，应对限流；实时进度与错误日志
-- **工程 ZIP 导出/导入** · **全局素材库** · **16:9 / 9:16 / 1:1 画幅**
-- **经典 / 全能分镜** · **`@图片N` 多图参考** · **尾帧衔接** · **导出分镜表 HTML**
-- **图片/视频提示词**全文编辑 · 手动上传/拖拽替换参考图
-
-</details>
-
-### 🗺 画布工作流（LibTV 式）
-
-制作页 / 剧集详情 → **画布模式**（`/film/:id/canvas`），与列表模式**同源数据**：
-
-| 能力 | 说明 |
-|------|------|
-| 竖排流水线 | 每镜一行：经典「文本→首帧/尾帧→视频」；全能「全能分镜词→视频」 |
-| 剧本节点 | 画布起点直接编辑剧本、AI 生成故事、提取角色/场景/道具 |
-| 节点操作面板 | 单击节点下方编辑/生成，无需频繁切列表 |
-| 右键 / 工具栏 | 新建分镜、集、角色、场景、道具；框选创建工作流 |
-| 工作流组 | 框选分镜 → 创建工作流 → **整组重跑**（生图/视频/配音可勾选） |
-| 布局持久化 | 拖动保存坐标；曲线连线；左键框选、中键/右键平移 |
-
-界面预览见 [上方截图](#-界面预览) · 📖 [画布工作流完整文档](docs/plans/2026-06-15-drama-canvas-workflow-plan.md)
-
-### 🤖 AI 配置 · 🌓 亮/暗主题 · 自定义提示词
-
-三类模型独立配置（图/视频/文本）；一键配置通义/火山；9 类提示词可自定义覆盖。
-
----
-
-## 🚀 快速开始
-
-### 方式一：下载 exe（推荐）
-
-前往 **[Releases 下载页](https://github.com/xuanyustudio/LocalMiniDrama/releases)**：
-
-| 版本 | 说明 | 适合 |
-|------|------|------|
-| `本地短剧助手 x.x.x.exe` | 标准版，**含示例项目** | 新手入门 |
-| `本地短剧助手-Lite-x.x.x.exe` | Lite 版，体积更小 | 熟悉流程后 |
-
-双击运行 → 「AI 配置」填入 API Key → 开始创作。
-
-> 首次运行配置：`%APPDATA%\LocalMiniDrama\backend\configs\config.yaml`
-
-### 方式二：源码开发
-
-> Node.js ≥ 18
-
-```bash
-git clone https://github.com/xuanyustudio/LocalMiniDrama.git
-cd LocalMiniDrama
-
-# 后端（端口 5679）
-cd backend-node && npm install
-cp configs/config.example.yaml configs/config.yaml   # 填入 API Key
-npm run migrate && npm start
-
-# 前端（端口 3013，新终端）
-cd frontweb && npm install && npm run dev
+```mermaid
+flowchart TD
+    A[Storyboard / 原始导演意图] --> B[Universal Shot Intent]
+    B --> C{Shot > Episode > Project}
+    C --> D[MiniMax H3 Adapter / DeepSeek]
+    C --> E[Seedance / Kling Adapter]
+    D --> F[缓存或手工 H3 Prompt]
+    F --> G[Node Backend → ComfyUI → H3]
+    E --> H[成本预测与明确确认]
+    H --> I[现有 Cloud Provider]
+    G --> J[本机 MP4 / Generation History]
+    I --> J
+    J --> K[Cost Engine / 耗时与费用记录]
+    J --> L[FFmpeg Compose]
+    G --> M[失败提示 / Retry Local / 手动切换模型]
 ```
 
-浏览器打开 `http://localhost:3013`，或双击根目录 **`run_dev.bat`** 一键启动。
+Node Backend 直接使用 ComfyUI API，无额外 Worker。模型选择、Prompt Adapter、Local Provider 与 Cost Engine 各自集中在服务模块中。历史项目继续使用现有 SQLite 数据，通过增量 migration 增加字段。
 
-📖 [详细开发/打包/Docker 指南](docs/quickstart.md) · [AI 配置指南](docs/configuration.md)
-
----
-
-## 🤖 AI 服务商支持
-
-| 服务商 | 文本 | 图片 | 视频 |
-|--------|:----:|:----:|:----:|
-| 阿里云 DashScope（通义） | ✅ | ✅ | ✅ |
-| 火山引擎 Volcengine（豆包 / Seedance 2.0） | ✅ | ✅ | ✅ |
-| 可灵 Kling AI（含 Omni） | — | ✅ | ✅ |
-| Agnes AI | ✅ | ✅ | ✅ |
-| Google Gemini（Imagen / Veo） | — | ✅ | ✅ |
-| Vidu 生数科技 | — | — | ✅ |
-| NanoBanana（含代理） | — | ✅ | — |
-| 本地 Ollama 等 OpenAI 兼容 | ✅ | — | — |
-| 其他 OpenAI 兼容接口 | ✅ | ✅ | — |
-
----
-
-## 🏗 项目架构
-
-```
-LocalMiniDrama/
-├── backend-node/     # Express + SQLite，生成/合成/导入导出
-├── frontweb/         # Vue 3 + Element Plus + @vue-flow/core
-│   └── views/        # FilmList · DramaDetail · FilmCreate · DramaCanvas
-├── desktop/          # Electron 打包 exe
-└── docs/             # 文档与计划
-```
+## Technology Stack
 
 | 层 | 技术 |
-|----|------|
-| 前端 | Vue 3 · Vite · Element Plus · Pinia · @vue-flow/core |
-| 后端 | Node.js · Express · SQLite (better-sqlite3) |
-| 桌面 | Electron 28 · electron-builder |
+| --- | --- |
+| Web | Vue 3、Vite、Element Plus、Pinia、Vue Flow |
+| Backend | Node.js、Express、better-sqlite3、SQLite |
+| Local Video | 现有 ComfyUI API、MiniMax H3 Workflow |
+| Media | FFmpeg / ffprobe、现有本地存储与 `/static` |
+| Desktop | 原有 Electron 项目；桌面安装包仍需单独构建与验证 |
+| Tests | Node.js 内置 Test Runner，云视频 Provider 使用 Mock |
 
----
+## Quick Start
 
-## 🗺 后续计划 Roadmap
+### 已部署的 Windows 环境
 
-| 状态 | 计划 | 说明 |
-|:----:|------|------|
-| ✅ | Seedance 2.0 + 全能模式 | 多图 `@图片N` · `universal_segment_text` |
-| ✅ | 画布工作流 | 列表/画布双视图 · 整组重跑 · 节点面板 |
-| 📋 | **场景图 → 全景图** | 由场景参考图 AI 扩展超宽/360° 全景，供大景别运镜与场景库 |
-| 📋 | 分镜参考图自由上传 | 任意图片作为分镜参考 |
-| 📋 | 参考图自由选择 | 生图时手动指定角色/场景参考 |
-| 📋 | 宫格图生成视频 | 多帧合图作为视频输入（部分模型已支持） |
+继续使用现有启动方式。仓库提供的本地启动脚本要求 Node.js **24.5 或以上**；无需为 H3 集成重装 LocalMiniDrama、ComfyUI、CUDA、PyTorch 或模型。
 
-> 认领功能或提建议 → [New Issue](https://github.com/xuanyustudio/LocalMiniDrama/issues/new)
+```powershell
+# 在 LocalMiniDrama 仓库根目录执行
+.\local_dev.ps1 -NoBrowser
+```
 
-<details>
-<summary><b>📋 更多历史版本亮点（v1.2.3 及更早）</b></summary>
+默认前端地址 `http://127.0.0.1:3013`，Backend `http://127.0.0.1:5679`。前端开发服务器代理 `/api` 与 `/static`。已有进程正常运行时可直接刷新网页。
 
-- **v1.2.3** 分镜解说旁白 · 导出解说 SRT
-- **v1.2.2** 连贯帧模式 · 小说/长文导入 · ffmpeg 自动解压
-- **v1.2.1** 可灵 Kling · 视频历史版本 · 场景/道具「加入本集」
-- **v1.1.x** 多集剧本 · AI 并发 · 四宫格 · 批量生图/视频 …
+### 从源码启动
 
-详见 **[CHANGELOG.md](CHANGELOG.md)**
+已有依赖与配置时，分别在两个终端运行：
 
-</details>
+```powershell
+cd backend-node
+npm run dev
+```
 
----
+```powershell
+cd frontweb
+npm run dev
+```
 
-## 🎯 适合谁
+全新源码环境才需要在这两个目录各执行 `npm install`，从 `backend-node/configs/config.example.yaml` 建立私有 `config.yaml`，并准备现有 FFmpeg。Backend 包声明 Node >=18；上述 Windows 启动脚本使用更新的 Node 代理能力，因此要求更高。
 
-| 用户 | 场景 |
-|------|------|
-| 📹 内容创作者 | 批量生产 AI 短剧 / 漫剧 |
-| 🔒 隐私敏感 | 素材与剧本完全留在本机 |
-| 🛠 开发者 | 二次开发、接入新 AI 服务商 |
-| 🌱 入门探索 | 低成本体验 AI 视频全流程 |
+Backend 启动时自动应用 migration。更新前备份 SQLite、素材与私有配置；不要用空数据库替换已有数据。备份与启动说明见 [LOCAL_DEPLOYMENT.md](LOCAL_DEPLOYMENT.md)。
 
----
+## AI Provider Setup
 
-## 🤝 参与贡献
+在 **AI 配置** 中设置文本、图片、视频模型的 Provider、API 协议、Base URL、模型名和 API Key，并启用所需配置。已有 DeepSeek / Seedream / Seedance / Kling 接入继续保留。
 
-- 🐛 [报告 Bug](https://github.com/xuanyustudio/LocalMiniDrama/issues/new)
-- 💡 [功能建议](https://github.com/xuanyustudio/LocalMiniDrama/issues/new)
-- 🔧 Fork → PR
-- ⭐ **Star** 帮助更多人发现本项目
+- H3 自动优化需要一个启用的 DeepSeek 文本配置。优先使用默认 DeepSeek，否则使用启用的 DeepSeek 配置。
+- 视频下拉框自动列出启用的视频配置中的模型，例如 Seedance 2.0 Fast、Seedance 2.5、Kling 与其他现有模型。
+- Local MiniMax H3 固定作为本地选项，不要求创建云视频 API Key。
+- 具体云协议仍由现有 Provider 实现处理，配置说明见 [AI 配置指南](docs/configuration.md)。该指南中的账户信息以 Provider 当前说明为准。
 
-**GitHub 仓库建议 Topics**（在仓库 Settings → Topics 添加，便于搜索）：  
-`ai-video` `short-drama` `storyboard` `vue3` `electron` `local-first` `seedance` `comic-drama`
+## ComfyUI + MiniMax H3
 
----
+使用已经可以运行的 ComfyUI Desktop 和 H3 Workflow。Storyboard 页顶部打开 **ComfyUI / Cost Settings** 设置地址，默认 `http://127.0.0.1:8188`；Desktop 使用其他端口时填写实际地址，例如 `http://127.0.0.1:8000`。**Test Connection** 检查服务与模板所需节点，不生成视频。
 
-<details>
-<summary><b>☕ 一杯咖啡的鼓励</b></summary>
+当前模板模式为 **I2VA**：Storyboard 首帧图像 + Prompt → 带原生音频的 H3 视频。默认 5 秒输入、24 FPS。帧数沿用源 Workflow 的公式，5 秒请求产生 124 帧，实际时长约 5.17 秒，以 ffprobe 结果为准。
 
-项目完全开源、无订阅。若对你有帮助，欢迎随缘打赏（自愿，不影响 Issue/PR 处理）：
+模板与映射位于：
 
-<table>
-  <tr>
-    <td align="center"><img src="项目截图/weixinpay.jpg" alt="微信赞赏码" width="200"/><br/><sub>微信支付</sub></td>
-    <td align="center"><img src="项目截图/ali.jpg" alt="支付宝收款码" width="200"/><br/><sub>支付宝</sub></td>
-  </tr>
-</table>
+- [minimax_h3.json](backend-node/configs/workflows/minimax_h3.json)：从现有保存图展开得到的 22 个执行节点。
+- [minimax_h3.mapping.json](backend-node/configs/workflows/minimax_h3.mapping.json)：Prompt、图像、Duration、Frames、FPS、宽高、Seed、Output 与模型节点统一映射。
 
-</details>
+模板保留原模型、LoRA、Sampler、Scheduler 和缩放链。首帧默认沿用源图的 1MP / 32 倍数缩放，H3 宽高跟随缩放后的图像。尾帧与外部音频未连接，不能直接当作 FL2VA / Ref2VA 模板使用。详细说明见 [COMFYUI.md](docs/COMFYUI.md)。
 
----
+## Provider-specific Prompt Adapter
 
-## 💬 联系 & 社区
+原 Storyboard Prompt 继续保留。Universal Shot Intent 从当前分镜整理时长、角色、外观、动作、表情、对白、场景、光照、景别、角度、镜头运动、动作顺序、声音、音乐和参考帧意图。
 
-[作者故事 & 碎碎念](docs/story.md) · 微信交流 / 用户群（二维码见仓库 `项目截图/` 目录）
+`videoPromptAdapters/` 中 H3 Adapter 按实际 Mode 生成系统规则；Seedance 与 Kling 目前保留原有 Prompt 行为，通过独立 Adapter 接口接入。其他云模型继续沿用已有逻辑。
 
-> 群二维码约 7 天有效，过期请加作者微信拉群。
+### DeepSeek → H3 Prompt Optimization
 
----
+每个 Shot 打开 **Original / Shot Intent · H3 Prompt**，可以查看和编辑 Intent JSON、查看 H3 Optimized Prompt，并点击 **Optimize for MiniMax H3 / 重新优化**。
 
-## 📄 License
+H3 规则来自 [MiniMax H3 官方 Prompt Writing Skill](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing)：英文描述、保留原语言对白、明确图像对齐、视觉与声音分区，短镜头聚焦一个核心动作。当前 I2VA 使用官方首帧声明与三字段结构。
 
-[MIT](LICENSE)
+Storyboard 与 Mode 未改变时复用缓存；手工 Prompt 标记 `user_edited` 后自动生成不会覆盖。明确点击重新优化并确认，才替换手工版本。优化会调用已配置的 DeepSeek 文本 API，费用由该账户承担；H3 的 API ¥0 指本地视频生成，未包含文本优化费用。见 [VIDEO_PROMPT_ADAPTER.md](docs/VIDEO_PROMPT_ADAPTER.md)。
 
----
+## Hybrid Video Workflow
 
-<div align="center">
+在现有 Storyboard 列表中操作，无需新建制作页面：
 
-**如果这个项目对你有帮助，请点 ⭐ Star —— 这是对作者最大的鼓励！**
+1. **Project Default Video Model** 设置项目默认模型。
+2. 每个 Shot 的 **Video Model** 可选择 Auto / Default、Local MiniMax H3 或已启用云模型。优先级为 **Shot > Episode > Project > 原 AI 默认配置**。
+3. **全部使用 MiniMax H3** 设置整集本地模型；**全部使用云端模型** 选择指定云模型。这两个操作会清除该集已有 Shot 覆盖，使所有 Shot 使用新选择。
+4. 勾选 Shot 后使用 **将选中 Shot 设置为**，只修改所选镜头。
+5. **恢复默认** 清除本集与 Shot 覆盖，重新继承项目默认；项目默认为 Auto 时使用原 AI 默认配置。
+6. **Generate Selected / Generate All** 根据各 Shot 的有效配置分发。本地与 Seedance、Kling 等可以在同一集混用。
 
-[⬇️ 立即下载](https://github.com/xuanyustudio/LocalMiniDrama/releases) · [📖 快速开始文档](docs/quickstart.md) · [🗺 画布文档](docs/plans/2026-06-15-drama-canvas-workflow-plan.md)
+原批量视频按钮继续保留，默认处理尚无完成视频的镜头；新增 Generate All 可重新生成选定范围。画布的生成流程也经过同一 Backend 路由与费用确认，逐 Shot 设置在列表中完成。
 
-</div>
+### Local Draft 与最终镜头
+
+**Local Draft / 本地预演** 临时使用 H3，不改变已保存的模型选择。生成后可以 Keep Local、Local Regenerate、Upgrade to Cloud Model 或 Keep Static。Upgrade 只修改模型，下一次生成云视频时仍需明确确认费用。Keep Static 使用当前分镜图生成静态 MP4，继续参与 FFmpeg 合成。
+
+H3 视频可以直接作为最终镜头。Local 失败只报错，不会自动转向收费模型，也不会自动增加重试次数。见 [HYBRID_VIDEO.md](docs/HYBRID_VIDEO.md)。
+
+## Cost Management
+
+**ComfyUI / Cost Settings** 可编辑各模型的 Provider、Model、Billing Type、Price、Currency、Resolution、Effective Date。价格来自用户填写，不预置未经核实的云视频单价；空价格显示未知，CNY / USD 等分别汇总。
+
+支持 `per_second`、`per_request`、`per_image`、`monthly_subscription` 与 `local_compute`。成本展示区分 Variable API Cost、Fixed Subscription Allocation、Overage、Local Compute、Electricity、Base Estimated Cost 和 Risk-adjusted Budget。
+
+混合批量任务生成前显示成本预测，只在用户明确确认后提交云视频。Backend 也校验费用确认凭据，模型、时长或价格变化后需要重新确认。全部 Local H3 无需收费确认。
+
+### Subscription Plan
+
+添加套餐并启用后，可以填写 Name、Monthly Fee、Included Quota、Quota Unit、Overage Price 与 Provider。将月费设为 **¥500**、Expected Episodes Per Month 设为 **20**，每集固定分摊为 **¥25**。
+
+额度不明确时保留空值，系统提示未知，不视为无限。固定分摊与按用量 API 费用分别展示；只有设为 `monthly_subscription` 的模型用于套餐额度计算。
+
+### Local Compute / Electricity
+
+本地视频 API Cost = ¥0。本机时间预测只使用成功历史记录的 `generation_elapsed_seconds / output_duration`，无有效数据时显示待实测。`local_compute` 可选填写每计算小时单价，不改变 API ¥0。
+
+电费默认关闭。启用后填写平均系统功耗 W 与 CNY/kWh：
+
+```text
+Electricity = Generation Hours × Power W / 1000 × Electricity Price
+```
+
+### 单集与整季
+
+Storyboard 顶部可展开当前 Episode 成本；**单集 / 整季成本** 选择 1 / 10 / 30 / 100 Episodes，按当前镜头分配与时长推算。Retry Budget Multiplier 支持 1.0x / 1.2x / 1.5x / 2.0x，只影响预算，固定月费分摊保持固定。
+
+**Generation History** 显示 Provider、模型、状态、时长、耗时、重试和 Estimated / Calculated / Actual。云 API 未提供账单时 Actual 为未知，不能把估算当作真实账单。计费口径与公式见 [COST_ENGINE.md](docs/COST_ENGINE.md)。
+
+## Data & Privacy
+
+SQLite、图片、视频和项目数据存储在配置指定的本机目录。Local H3 的图像发往设置的 ComfyUI 服务；DeepSeek 优化会向文本 Provider 发送 Shot Intent；使用云模型时 Prompt 与必要参考素材会发送给该 Provider。配置图床或代理时也可能经过相应服务。
+
+私有 API Key、数据库、素材、日志与 `.local` 备份不应提交到 Git。Workflow 模板不包含原私人 Prompt 或 API Key，但保留源 Workflow 的模型与 LoRA 名称。更新、迁移前请备份数据库、storage 与私有配置。
+
+## Troubleshooting
+
+| 现象 | 处理方式 |
+| --- | --- |
+| ComfyUI Offline | 检查 Desktop 是否运行，以及 Settings 的实际端口；已有云模型不受本地离线影响 |
+| 模型未配置或已停用 | 在 AI 配置启用原模型，或手动重新选择，不会自动换成其他模型 |
+| H3 缺少首帧 | 先生成或导入本地分镜图；远程图需要先进入 Media Library |
+| 尾帧 / 外部音频报错 | 当前模板只接首帧，使用 I2VA 输入；其他 Mode 需对应 Workflow |
+| H3 Prompt 优化失败 | 检查启用的 DeepSeek 配置和官方字段格式；缓存或手工 Prompt 可以继续使用 |
+| H3 排队或超时 | History 查看进度；已有任务可继续查询；Retry Local 会创建新任务 |
+| 费用未知 | 补全实际账户价格、套餐额度或本机成功历史；确认未知费用不会使 API 免费 |
+| 合成 / Keep Static 失败 | 检查现有 FFmpeg 与 ffprobe 路径，参考图与 MP4 是否可访问 |
+
+## Current Limitations
+
+- 集成后的真实 H3 生成与 MP4 端到端验证仍待完成，不能将 Mock 测试视为实机成功或稳定性证明。
+- 当前 Workflow 只支持 I2VA、24 FPS、4–15 秒输入，默认 5 秒；尾帧与外部音频未连接。输出帧数采用源 Workflow 的网格公式。
+- 云视频均使用 Mock 验证，真实 Provider 的账户权限、配额与账单需自行确认。
+- H3 语法校验只检查结构与 Mode 对齐，不证明模型执行效果、对白长度或视觉质量。
+- 单集 / 整季预算按当前集比例推算，计费没有自动汇率、自动账单同步；文本优化、图片和 TTS 费用不纳入视频报价。`per_image` 当前按每 Shot 一个计费图像单位估算，多图计费需按实际账户调整预算。
+- 本机估速依赖成功输出样本；缺少 FFmpeg / ffprobe 时无法完整合成或测量。Web 改动不等于重新发布了 Electron 安装包。
+
+## Roadmap
+
+后续可在现有接口上补充独立验证过的多 Mode Workflow、Seedance / Kling 专用 Prompt 优化、账户账单导入与多图计费精细统计。每项扩展都需要对应实现与验证后才能视为可用功能。
+
+## 开发验证
+
+```powershell
+cd backend-node
+node --test test/*.test.js
+```
+
+```powershell
+cd frontweb
+node --test test/*.test.js
+npm run build
+```
+
+测试覆盖增量迁移、模型选择、混合分发、Mock ComfyUI 协议、云调用确认、Prompt 缓存与成本公式，不调用真实收费云视频 API。实机 H3 验证独立执行。
+
+## Acknowledgements & License
+
+感谢 [xuanyustudio 与 LocalMiniDrama 贡献者](https://github.com/xuanyustudio/LocalMiniDrama)、[ComfyUI](https://github.com/Comfy-Org/ComfyUI)、[MiniMax H3](https://github.com/MiniMax-AI/MiniMax-H3)、Vue、Node.js、SQLite 与 FFmpeg 社区。
+
+代码沿用 [MIT License](LICENSE)，保留 `Copyright (c) 2026 xuanyustudio`。模型、LoRA、媒体和第三方服务各自的授权条款需分别遵守。

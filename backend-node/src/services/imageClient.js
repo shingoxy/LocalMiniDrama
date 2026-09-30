@@ -9,6 +9,7 @@ const taskService = require('./taskService');
 const { loadConfig } = require('../config');
 const { postJSONWithTimeout } = require('./aiClient');
 const seedance2AssetGuards = require('../utils/seedance2AssetGuards');
+const { imageResponseMetadata, saveImageResponseMetadata } = require('./arkImageSource');
 
 /** 图生 POST 使用 Node http(s)，默认 10 分钟，避免 undici fetch 大包体/慢链路下模糊失败 */
 const IMAGE_HTTP_TIMEOUT_MS = 600000;
@@ -157,7 +158,27 @@ const DASHSCOPE_MAX_PIXELS = 1638400;
 // 需要自动将低分辨率请求放大到该标准，保持长宽比
 const SEEDREAM_MIN_PIXELS = 3686400;
 
-function fixSeedreamSize(size) {
+function fixSeedreamSize(size, isPro5 = false) {
+  if (isPro5) {
+    const value = String(size || '2K').trim();
+    if (/^(1K|1\.5K|2K)$/i.test(value)) return value.toUpperCase();
+    const match = value.match(/^(\d+)\s*[x*]\s*(\d+)$/i);
+    if (!match) throw new Error('Seedream 5.0 Pro 尺寸支持 1K、1.5K、2K 或 宽x高');
+    let w = Number(match[1]), h = Number(match[2]);
+    if (!Number.isSafeInteger(w) || !Number.isSafeInteger(h) || !w || !h || w / h < 1 / 16 || w / h > 16) throw new Error('Seedream 5.0 Pro 尺寸需为有效整数，宽高比需在 1:16 至 16:1 内');
+    if (w * h < 921600 || w * h > 4624220) {
+      // Preserve the exact aspect ratio while bringing existing project sizes into the API range.
+      const gcd = (a, b) => b ? gcd(b, a % b) : a;
+      const unit = gcd(w, h);
+      const rw = w / unit, rh = h / unit;
+      const min = Math.ceil(Math.sqrt(921600 / (rw * rh)));
+      const max = Math.floor(Math.sqrt(4624220 / (rw * rh)));
+      if (min > max) throw new Error('Seedream 5.0 Pro 此尺寸无法在像素范围内保持原宽高比');
+      const scale = Math.max(min, Math.min(max, unit));
+      w = rw * scale; h = rh * scale;
+    }
+    return `${w}x${h}`;
+  }
   if (!size || typeof size !== 'string') return '1920x1920'; // 默认使用最低要求 1920x1920
   // 支持 1024x1024 或 1024*1024 格式，统一解析
   const s = size.trim().toLowerCase().replace(/\*/g, 'x');
@@ -1347,7 +1368,7 @@ async function callGeminiImageApi(db, config, log, opts) {
     },
   };
 
-  const url = `${base}/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+  const url = `${base}/v1beta/models/${encodeURIComponent(modelName)}:generateContent`;
   log.info('[Gemini图生] → 发送请求', { image_gen_id, model: modelName, url: url.replace(/key=[^&]+/, 'key=***').slice(0, 120), elapsed: elapsed() });
 
   const tReq = Date.now();
@@ -1356,7 +1377,7 @@ async function callGeminiImageApi(db, config, log, opts) {
   try {
     const out = await postJSONWithTimeout(
       url,
-      { 'Content-Type': 'application/json' },
+      { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body,
       IMAGE_HTTP_TIMEOUT_MS,
     );
@@ -1414,6 +1435,13 @@ async function callGeminiImageApi(db, config, log, opts) {
  * @returns {Promise<{ image_url?: string, error?: string }>}
  */
 async function callImageApi(db, log, opts) {
+  const mediaLanguage = require('./mediaLanguage');
+  if (mediaLanguage.isEnglishMedia(db, opts.drama_id)) {
+    const texts = await mediaLanguage.translateMediaTexts(db, log, opts.drama_id, {
+      prompt: opts.prompt, system_prompt: opts.system_prompt, user_negative_prompt: opts.user_negative_prompt,
+    });
+    opts = { ...opts, ...texts, prompt: `${texts.prompt}\n\n${mediaLanguage.ENGLISH_IMAGE_POLICY}` };
+  }
   const {
     prompt,
     model: preferredModel,
@@ -1524,8 +1552,12 @@ async function callImageApi(db, log, opts) {
   const isAgnes = isAgnesImageConfig(config, model);
   // doubao-seedream 系列模型（含通过自定义代理使用的场景）：使用 volcengine 图片 API 规范
   const isSeedream = isVolc || /seedream|doubao/i.test(model);
+  let modelSettings = {};
+  try { modelSettings = typeof config.settings === 'string' ? JSON.parse(config.settings) : (config.settings || {}); } catch (_) {}
+  const isPro5 = /seedream[-_.]?5[-_.]?0[-_.]?pro/i.test(model) || (isVolc && !/seedream/i.test(model) && modelSettings.seedream_version === '5.0-pro');
   // 解析参考图：本地路径/localhost URL → base64，公网 URL → 直接传
   const rawRefs = Array.isArray(reference_image_urls) ? reference_image_urls.filter(Boolean) : [];
+  if (isPro5 && rawRefs.length > 10) throw new Error('Seedream 5.0 Pro 最多支持 10 张参考图');
   const resolvedRefs = rawRefs.map((r) => resolveImageRef(r, files_base_url, storage_local_path)).filter(Boolean);
   if (resolvedRefs.length > 0) {
     log.info('Image API request with reference images', {
@@ -1538,7 +1570,8 @@ async function callImageApi(db, log, opts) {
   // doubao-seedream-4-5+ 要求最低 3686400 像素，不足时等比放大；Agnes 使用官方 size 档位 + ratio
   let effectiveSize = size;
   let agnesSizeSpec = null;
-  if (isSeedream && size) effectiveSize = fixSeedreamSize(size);
+  if (isPro5) effectiveSize = fixSeedreamSize(size, true);
+  else if (isSeedream && size) effectiveSize = fixSeedreamSize(size);
   else if (isAgnes) {
     agnesSizeSpec = mapAgnesImageSizeSpec(size);
     effectiveSize = agnesSizeSpec.size;
@@ -1546,17 +1579,17 @@ async function callImageApi(db, log, opts) {
 
   const body = {
     model,
-    prompt: effectivePrompt,
+    prompt: isPro5 && mergedNegativePrompt ? `${effectivePrompt}\nAvoid: ${mergedNegativePrompt}` : effectivePrompt,
     // doubao-seedream / Agnes 均不使用 n
     ...(!isSeedream && !isAgnes ? { n: 1 } : {}),
     ...(effectiveSize ? { size: effectiveSize } : {}),
     ...(isAgnes && agnesSizeSpec ? { ratio: agnesSizeSpec.ratio } : {}),
-    ...(!isAgnes && quality ? { quality } : {}),
+    ...(!isAgnes && !isPro5 && quality ? { quality } : {}),
     // volcengine 原生或 doubao-seedream 模型均需关闭水印（默认为 true）
     ...((isVolc || isSeedream) ? { watermark: false } : {}),
     // 多张参考图时加 negative_prompt，防止模型把参考图拼成左右分割的合图
     // Doubao/Seedream 原生支持；通用 OpenAI-compat 接口大多也会接受该字段（不支持的会忽略）
-    ...(mergedNegativePrompt ? { negative_prompt: mergedNegativePrompt } : {}),
+    ...(!isPro5 && mergedNegativePrompt ? { negative_prompt: mergedNegativePrompt } : {}),
     // 参考图字段：volcengine doubao-seedream API 规范使用 image（数组），见官方文档
     ...(resolvedRefs.length > 0 && !isAgnes ? { image: resolvedRefs } : {}),
     // Agnes Image 2.x：response_format 必须放 extra_body；参考图走 extra_body.image
@@ -1636,7 +1669,7 @@ async function callImageApi(db, log, opts) {
     });
     return { error: '未返回图片地址' };
   }
-  return { image_url: imageUrl };
+  return { image_url: imageUrl, ...imageResponseMetadata(config, model, data, imageUrl, resolvedRefs.length) };
 }
 
 /**
@@ -1734,6 +1767,7 @@ function createAndGenerateImage(db, log, opts) {
         log.error('Image generation failed', { image_gen_id: imageGenId, error: result.error });
         return;
       }
+      saveImageResponseMetadata(db, imageGenId, result);
       let localPath = null;
       try {
         const loadConfig = require('../config').loadConfig;
@@ -1872,6 +1906,9 @@ function rowToItem(r) {
     quality: r.quality,
     image_url: r.image_url,
     local_path: r.local_path,
+    original_url: r.original_url,
+    generated_at: r.generated_at,
+    generation_mode: r.generation_mode,
     status: r.status,
     task_id: r.task_id,
     error_msg: r.error_msg,
@@ -1949,6 +1986,7 @@ module.exports = {
   fixAgnesImageSize,
   mapAgnesImageSizeSpec,
   isAgnesImageConfig,
+  fixSeedreamSize,
   /** 图床 URL 缓存（image_proxy_cache），供 SD2 认证等复用 */
   getProxyCache,
   getProxyCacheValidated,

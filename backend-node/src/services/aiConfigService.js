@@ -1,6 +1,7 @@
 // AI 配置 CRUD，与 Go application/services/ai_service.go 对齐
 const fs = require('fs');
 const path = require('path');
+const { registerSecret } = require('../utils/redactSecrets');
 const { normalizeMaterialHubToken } = require('./jimengMaterialHubService');
 
 function normalizeApiKeyForService(serviceType, apiKey) {
@@ -68,6 +69,8 @@ function getConfig(db, id) {
 }
 
 function createConfig(db, log, req) {
+  registerSecret(req.api_key);
+  registerSecret(normalizeApiKeyForService(req.service_type, req.api_key || ''));
   const now = new Date().toISOString();
   const model = modelToDb(req.model);
   let endpoint = req.endpoint || '';
@@ -83,7 +86,8 @@ function createConfig(db, log, req) {
         queryEndpoint = '/videos/{taskId}';
       }
     } else if (p === 'gemini' || p === 'google') {
-      endpoint = '/v1beta/models/{model}:generateContent';
+      endpoint = st === 'text' ? '/chat/completions'
+        : st === 'video' ? '' : '/v1beta/models/{model}:generateContent';
     } else if (p === 'dashscope' || p === 'qwen_image') {
       if (st === 'image' || st === 'storyboard_image') endpoint = '/api/v1/services/aigc/multimodal-generation/generation';
       else if (st === 'video' && p === 'dashscope') {
@@ -139,8 +143,10 @@ function createConfig(db, log, req) {
 }
 
 function updateConfig(db, log, id, req) {
+  registerSecret(req.api_key);
   const existing = getConfig(db, id);
   if (!existing) return null;
+  registerSecret(normalizeApiKeyForService(existing.service_type, req.api_key || ''));
   const updates = [];
   const params = [];
   if (req.name != null) {
@@ -213,6 +219,7 @@ function deleteConfig(db, log, id) {
 }
 
 function rowToConfig(r) {
+  registerSecret(r.api_key);
   const cfg = {
     id: r.id,
     service_type: r.service_type,
@@ -249,6 +256,7 @@ function rowToConfig(r) {
  * @returns Promise<void> 成功 resolve，失败 reject(error)
  */
 async function testConnection(opts) {
+  registerSecret(opts.api_key);
   const base = (opts.base_url || '').replace(/\/$/, '');
   if (!base) throw new Error('base_url 必填');
   if (!opts.api_key) throw new Error('api_key 必填');
@@ -277,14 +285,22 @@ async function testConnection(opts) {
   }
 
   // --- Gemini ---
-  if (provider === 'gemini' || provider === 'google') {
+  if ((provider === 'gemini' || provider === 'google') && serviceType !== 'text') {
+    if (serviceType === 'video') {
+      // Validate model access without starting a paid Veo operation.
+      const res = await fetch(base + '/v1beta/models/' + encodeURIComponent(model), {
+        headers: { 'x-goog-api-key': opts.api_key },
+      });
+      if (!res.ok) throw new Error(`Veo 模型查询失败: ${res.status} ${(await res.text()).slice(0, 200)}`);
+      return;
+    }
     endpoint = endpoint || '/v1beta/models/{model}:generateContent';
     const path = endpoint.replace(/{model}/g, model || 'gemini-pro');
-    const url = base + (path.startsWith('/') ? path : '/' + path) + '?key=' + encodeURIComponent(opts.api_key || '');
+    const url = base + (path.startsWith('/') ? path : '/' + path);
     const body = { contents: [{ parts: [{ text: 'Hello' }] }] };
     const res = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': opts.api_key },
       body: JSON.stringify(body),
     });
     if (!res.ok) {
@@ -526,6 +542,7 @@ function applyVendorLock(db, log, cfg) {
   for (const item of configs) {
     const mapKey = `${item.service_type}:${item.provider}`;
     const apiKey = savedKeys.get(mapKey) ?? item.api_key ?? '';
+    registerSecret(apiKey);
     const model = Array.isArray(item.model)
       ? JSON.stringify(item.model)
       : item.model ? JSON.stringify([item.model]) : '[]';
@@ -561,6 +578,7 @@ function applyVendorLock(db, log, cfg) {
  * 批量替换所有配置的 api_key（仅限锁定模式下使用）
  */
 function bulkUpdateApiKey(db, log, newKey) {
+  registerSecret(newKey);
   const now = new Date().toISOString();
   const info = db.prepare(
     'UPDATE ai_service_configs SET api_key = ?, updated_at = ? WHERE deleted_at IS NULL'

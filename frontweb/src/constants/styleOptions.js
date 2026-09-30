@@ -6,6 +6,10 @@ export const generationStyleOptions = [
   {
     label: '写实 / 影视',
     options: [
+      { label: '欧美短剧（英文 / 竖屏）', value: 'western short drama',
+        prompt: '欧美竖屏短剧，真实现代美国生活，自然表演，紧凑构图，电影灯光，9:16 竖屏',
+        promptEn: 'American vertical short drama, contemporary US settings, natural performances, tight framing, cinematic lighting, 9:16 portrait composition',
+        color: 'linear-gradient(135deg,#1a1a2e,#c9aa71)', thumb: '/style-thumbs/realistic.jpg' },
       { label: '写实',    value: 'realistic',
         prompt:   '超写实摄影风格，8K超清细节，精准自然光照，真实皮肤纹理，专业摄影机拍摄，RAW原片质感，超高清锐度，人物面部毛孔清晰可见',
         promptEn: 'photorealistic, ultra-detailed, 8k uhd, sharp focus, natural lighting, real skin texture, hyperrealism, professional photography, RAW photo',

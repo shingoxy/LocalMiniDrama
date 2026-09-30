@@ -143,12 +143,14 @@ function getImageProxyUploadSettings() {
     const cfg = require('../config').loadConfig();
     const ip = cfg?.image_proxy || {};
     return {
+      enabled: ip.enabled !== false,
       uploadUrl: (ip.upload_url || 'https://imageproxy.zhongzhuan.chat/api/upload').trim(),
       timeoutMs: Math.max(5000, Number(ip.upload_timeout_seconds ?? 45) * 1000),
       maxAttempts: Math.max(1, Math.min(5, Number(ip.upload_max_attempts ?? 2))),
     };
   } catch (_) {
     return {
+      enabled: false,
       uploadUrl: 'https://imageproxy.zhongzhuan.chat/api/upload',
       timeoutMs: 45000,
       maxAttempts: 2,
@@ -163,7 +165,11 @@ function getImageProxyUploadSettings() {
  * 失败自动重试；成功返回 string URL，全部失败返回 null。
  */
 async function uploadToImageProxy(imageBuffer, mimeType, log, tag) {
-  const { uploadUrl, timeoutMs, maxAttempts } = getImageProxyUploadSettings();
+  const { enabled, uploadUrl, timeoutMs, maxAttempts } = getImageProxyUploadSettings();
+  if (!enabled) {
+    log.info('[图床上传] 已在 image_proxy.enabled 中禁用', { tag });
+    return null;
+  }
   const extMap = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp', 'image/gif': 'gif' };
   const ext = extMap[mimeType] || 'jpg';
   const filename = `ref_${Date.now()}.${ext}`;

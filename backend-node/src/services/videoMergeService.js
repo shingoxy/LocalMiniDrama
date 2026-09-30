@@ -163,9 +163,9 @@ function runFfmpegConcat(localPaths, outputPath, log) {
 /**
  * 异步处理视频合成：优先使用 ffmpeg 真正合并多段视频；失败或无 ffmpeg 时用首段作为 merged_url。
  */
-async function processVideoMerge(db, log, mergeId, baseUrl) {
+async function runVideoMerge(db, log, mergeId, baseUrl) {
   const r = db.prepare('SELECT * FROM video_merges WHERE id = ? AND deleted_at IS NULL').get(mergeId);
-  if (!r) return;
+  if (!r || r.status === 'completed' || r.status === 'failed') return;
   const taskId = r.task_id;
   const episodeId = r.episode_id;
   let scenes = [];
@@ -174,9 +174,9 @@ async function processVideoMerge(db, log, mergeId, baseUrl) {
   } catch (_) {
     log.warn('video merge parse scenes failed', { merge_id: mergeId });
   }
-  const now = new Date().toISOString();
   db.prepare('UPDATE video_merges SET status = ? WHERE id = ?').run('processing', mergeId);
   const taskService = require('./taskService');
+  if (taskId) taskService.updateTaskStatus(db, taskId, 'processing', 10, '正在合成视频');
   if (scenes.length === 0) {
     db.prepare('UPDATE video_merges SET status = ?, error_msg = ? WHERE id = ?').run('failed', '无有效视频片段', mergeId);
     if (taskId) taskService.updateTaskError(db, taskId, '无有效视频片段');
@@ -221,21 +221,26 @@ async function processVideoMerge(db, log, mergeId, baseUrl) {
     cwd: process.cwd(),
   });
 
-  let mergedRelativePath = null;
-  if (localPaths.length > 0 && ffmpegAvailable && localPaths.length <= 100) {
+  const savedPath = r.merged_url && path.resolve(storageRoot, r.merged_url);
+  let mergedRelativePath = savedPath && savedPath.startsWith(path.resolve(storageRoot) + path.sep) && fs.existsSync(savedPath)
+    ? r.merged_url : null;
+  if (!mergedRelativePath && localPaths.length > 0 && ffmpegAvailable && localPaths.length <= 100) {
     const projectSubdir = storageLayout.getProjectStorageSubdir(db, r.drama_id);
     const sub = projectSubdir && String(projectSubdir).trim();
     const mergedDir = sub
       ? path.join(storageRoot, sub, 'videos', 'merged')
       : path.join(storageRoot, 'videos', 'merged');
     if (!fs.existsSync(mergedDir)) fs.mkdirSync(mergedDir, { recursive: true });
-    const outputFileName = `merged_${Date.now()}.mp4`;
+    const outputFileName = `merged_${mergeId}_${Date.now()}.mp4`;
     const outputPath = path.join(mergedDir, outputFileName);
     const ok = runFfmpegConcat(localPaths, outputPath, log);
     if (ok && fs.existsSync(outputPath)) {
       mergedRelativePath = sub
         ? path.join(sub, 'videos', 'merged', outputFileName).replace(/\\/g, '/')
         : path.join('videos', 'merged', outputFileName).replace(/\\/g, '/');
+      db.prepare('UPDATE video_merges SET merged_url = ?, duration = ? WHERE id = ?')
+        .run(mergedRelativePath, Math.round(totalDuration) || null, mergeId);
+      if (taskId) taskService.updateTaskStatus(db, taskId, 'processing', 70, '视频已拼接，正在处理字幕和声音');
       log.info('Video merge completed (ffmpeg)', { merge_id: mergeId, episode_id: episodeId, output: mergedRelativePath });
     }
   }
@@ -250,6 +255,7 @@ async function processVideoMerge(db, log, mergeId, baseUrl) {
     !!mergeOpts.burn_narration_subtitles
     || !!mergeOpts.burn_dialogue_audio
     || !!(mergeOpts.watermark_text && String(mergeOpts.watermark_text).trim());
+  const concatRelativePath = mergedRelativePath;
   if (mergedRelativePath && ffmpegAvailable && postNeed) {
     const mergedAbsPath = path.join(storageRoot, mergedRelativePath.replace(/\//g, path.sep));
     if (fs.existsSync(mergedAbsPath)) {
@@ -259,13 +265,14 @@ async function processVideoMerge(db, log, mergeId, baseUrl) {
         storageRoot,
         scenes,
         episodeId,
+        dramaId: r.drama_id,
         mergeOpts,
       });
       if (post.ok && post.relativePath) {
         mergedRelativePath = post.relativePath;
         log.info('Video merge: merged episode post-process', { merge_id: mergeId, out: mergedRelativePath });
       } else if (post.error && post.error !== 'NO_POST_OPTS') {
-        log.warn('Video merge: post-process skipped', { merge_id: mergeId, err: post.error });
+        throw new Error(post.error);
       }
     }
   }
@@ -274,17 +281,57 @@ async function processVideoMerge(db, log, mergeId, baseUrl) {
     try { if (fs.existsSync(p)) fs.unlinkSync(p); } catch (_) {}
   }
 
+  if (taskId && taskService.getTask(db, taskId)?.status === 'failed') {
+    throw new Error(taskService.getTask(db, taskId).error || '任务已取消');
+  }
   const finalMergedUrl = mergedRelativePath || mergedUrlFallback;
-  db.prepare(
-    'UPDATE video_merges SET status = ?, merged_url = ?, duration = ?, completed_at = ?, error_msg = ? WHERE id = ?'
-  ).run('completed', finalMergedUrl, Math.round(totalDuration) || null, now, null, mergeId);
-  db.prepare('UPDATE episodes SET video_url = ?, status = ?, updated_at = ? WHERE id = ?').run(finalMergedUrl, 'completed', now, episodeId);
-  if (taskId) {
-    taskService.updateTaskResult(db, taskId, { merge_id: mergeId, video_url: finalMergedUrl, duration: Math.round(totalDuration) });
+  const completedAt = new Date().toISOString();
+  db.transaction(() => {
+    db.prepare(
+      'UPDATE video_merges SET status = ?, merged_url = ?, duration = ?, completed_at = ?, error_msg = ? WHERE id = ?'
+    ).run('completed', finalMergedUrl, Math.round(totalDuration) || null, completedAt, null, mergeId);
+    db.prepare('UPDATE episodes SET video_url = ?, status = ?, updated_at = ? WHERE id = ?').run(finalMergedUrl, 'completed', completedAt, episodeId);
+    if (taskId) taskService.updateTaskResult(db, taskId, { merge_id: mergeId, video_url: finalMergedUrl, duration: Math.round(totalDuration) });
+  })();
+  if (concatRelativePath && concatRelativePath !== finalMergedUrl) {
+    try { fs.unlinkSync(path.join(storageRoot, concatRelativePath)); }
+    catch (e) { log.warn('Video merge: intermediate cleanup failed', { merge_id: mergeId, error: e.message }); }
   }
   if (!mergedRelativePath) {
     log.info('Video merge completed (first-clip fallback)', { merge_id: mergeId, episode_id: episodeId });
   }
+}
+
+async function processVideoMerge(db, log, mergeId, baseUrl) {
+  const row = db.prepare('SELECT task_id FROM video_merges WHERE id = ? AND deleted_at IS NULL').get(mergeId);
+  if (!row) return;
+  const taskService = require('./taskService');
+  if (row.task_id && taskService.getTask(db, row.task_id)?.status === 'failed') return;
+  try {
+    await runVideoMerge(db, log, mergeId, baseUrl);
+  } catch (e) {
+    const error = e.message || String(e);
+    db.prepare("UPDATE video_merges SET status = 'failed', error_msg = ? WHERE id = ?").run(error, mergeId);
+    if (row.task_id) taskService.updateTaskError(db, row.task_id, error);
+    log.error('Video merge failed', { merge_id: mergeId, error });
+  }
+}
+
+// Local concat/post-processing can resume from persisted scenes and the concat output.
+function resumeProcessingVideoMerges(db, log, baseUrl) {
+  db.prepare(`UPDATE video_merges SET status = 'failed', error_msg = (
+      SELECT t.error FROM async_tasks t WHERE t.id = video_merges.task_id
+    ) WHERE status IN ('pending', 'processing') AND deleted_at IS NULL
+      AND EXISTS (SELECT 1 FROM async_tasks t WHERE t.id = video_merges.task_id AND t.status = 'failed')`).run();
+  const rows = db.prepare(`SELECT m.id, m.task_id FROM video_merges m
+    JOIN async_tasks t ON t.id = m.task_id
+    WHERE m.status IN ('pending', 'processing') AND t.status IN ('pending', 'processing')
+      AND m.deleted_at IS NULL AND t.deleted_at IS NULL`).all();
+  for (const row of rows) {
+    log.info('Resuming local video merge after startup', { merge_id: row.id, task_id: row.task_id });
+    setImmediate(() => { processVideoMerge(db, log, row.id, baseUrl); });
+  }
+  return rows.map((row) => row.task_id);
 }
 
 module.exports = {
@@ -293,4 +340,5 @@ module.exports = {
   create,
   deleteById,
   processVideoMerge,
+  resumeProcessingVideoMerges,
 };

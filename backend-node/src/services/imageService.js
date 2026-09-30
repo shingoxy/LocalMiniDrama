@@ -38,6 +38,9 @@ function rowToItem(r) {
     model: r.model,
     image_url: r.image_url,
     local_path: r.local_path,
+    original_url: r.original_url,
+    generated_at: r.generated_at,
+    generation_mode: r.generation_mode,
     status: r.status,
     task_id: r.task_id,
     error_msg: r.error_msg,
@@ -61,6 +64,7 @@ const uploadService = require('./uploadService');
 const storageLayout = require('./storageLayout');
 const aiClient = require('./aiClient');
 const promptI18n = require('./promptI18n');
+const { saveImageResponseMetadata } = require('./arkImageSource');
 
 const LAST_FRAME_TYPES = new Set(['last', 'storyboard_last', 'tail', 'last_frame']);
 
@@ -1397,6 +1401,7 @@ async function processImageGeneration(db, log, imageGenId) {
       return;
     }
 
+    saveImageResponseMetadata(db, imageGenId, result);
     // ── Step 5: 保存图片到本地 ───────────────────────────────────────
     log.info('[图生] Step5 保存到本地 →', { id: imageGenId, elapsed: elapsed() });
     const tSave = Date.now();

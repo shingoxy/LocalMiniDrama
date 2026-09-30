@@ -15,9 +15,11 @@ function routes(db, log) {
         response.internalError(res, err.message);
       }
     },
-    create: (req, res) => {
+    create: async (req, res) => {
       try {
-        const body = req.body || {};
+        const hybrid = require('../services/hybridVideoService');
+        const submission = await hybrid.prepareSubmission(db, req.body || {});
+        const body = submission.body;
         const task = taskService.createTask(db, log, 'video_generation', String(body.drama_id || ''));
         const now = new Date().toISOString();
         const dramaId = Number(body.drama_id) || 0;
@@ -66,6 +68,7 @@ function routes(db, log) {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'processing', ?, ?, ?)`
         ).run(dramaId, storyboardId, provider, prompt, model, duration, aspectRatio, resolution, seed, cameraFixed, watermark, imageUrl, firstFrameUrl, lastFrameUrl, refImagesJson, task.id, now, now);
         const videoGenId = db.prepare('SELECT last_insert_rowid() as id').get().id;
+        hybrid.recordSubmission(db, videoGenId, submission.prepared, body);
         setImmediate(() => {
           videoService.processVideoGeneration(db, log, videoGenId);
         });
@@ -73,7 +76,7 @@ function routes(db, log) {
         response.created(res, item || { id: videoGenId, task_id: task.id, status: 'processing' });
       } catch (err) {
         log.error('videos create', { error: err.message });
-        response.internalError(res, err.message);
+        response.error(res, err.status || (err.message === 'ComfyUI Offline' ? 503 : 400), 'VIDEO_SUBMISSION_ERROR', err.message);
       }
     },
     get: (req, res) => {

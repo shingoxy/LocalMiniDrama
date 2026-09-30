@@ -13,6 +13,8 @@ function createApp() {
   const db = getDb(config.database);
   const { runMigrationsAndEnsure } = require('./db/migrate.js');
   runMigrationsAndEnsure(db);
+  const { registerSecret } = require('./utils/redactSecrets');
+  for (const row of db.prepare('SELECT api_key FROM ai_service_configs').all()) registerSecret(row.api_key);
 
   // 厂商锁定模式：在迁移完成后同步 vendor_lock 配置
   const { applyVendorLock } = require('./services/aiConfigService');
@@ -20,12 +22,22 @@ function createApp() {
   const log = logger;
 
   const taskService = require('./services/taskService');
-  taskService.failOrphanedAsyncTasksOnStartup(db, log);
+  const mergeService = require('./services/videoMergeService');
+  const resumableMergeTasks = mergeService.resumeProcessingVideoMerges(db, log, config.storage?.base_url);
+  taskService.failOrphanedAsyncTasksOnStartup(db, log, resumableMergeTasks);
 
   const { resumeProcessingVideoGenerations } = require('./services/videoService');
   resumeProcessingVideoGenerations(db, log);
 
   const app = express();
+  // Reject cross-site access before reading credentials or mutating local data.
+  app.use((req, res, next) => {
+    const allowed = config.server.cors_origins || [];
+    if (req.headers.origin && !allowed.includes(req.headers.origin)) {
+      return res.status(403).json({ success: false, error: { message: 'Origin is not allowed' } });
+    }
+    next();
+  });
   app.use(express.json({ limit: '10mb' }));
   app.use(express.urlencoded({ extended: true }));
 
