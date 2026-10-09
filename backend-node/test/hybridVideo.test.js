@@ -115,6 +115,21 @@ test('H3 mapping preserves original math, samplers and loader settings; rejects 
   assert.throws(()=>comfy.bindWorkflow({duration:5,last_frame:'a.png'}),/未连接/);
   assert.throws(()=>comfy.bindWorkflow({duration:5,fps:30}),/24 FPS/);
 });
+test('connection validation permits runtime image uploads but still rejects missing models',async t=>{
+  const {workflow}=comfy.loadTemplate();
+  const info={};
+  for(const node of Object.values(workflow)) info[node.class_type]={input:{required:{},optional:{}}};
+  info.LoadImage.input.required.image=[['existing.png'],{image_upload:true}];
+  const loader=Object.values(workflow).find(node=>node.class_type==='UNETLoader');
+  info.UNETLoader.input.required.unet_name=[[loader.inputs.unet_name],{}];
+  const server=http.createServer((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(info));});
+  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
+  t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const base=`http://127.0.0.1:${server.address().port}`;
+  assert.equal(await comfy.validateNodes(base),true);
+  info.UNETLoader.input.required.unet_name=[['missing-model.safetensors'],{}];
+  await assert.rejects(comfy.validateNodes(base),/当前模型或 LoRA 不可用/);
+});
 test('ComfyUI submit, queue, history, MP4 retrieval and cancellation use local protocol',async t=>{
   let submitted=null,deleted=null;
   const server=http.createServer(async(req,res)=>{

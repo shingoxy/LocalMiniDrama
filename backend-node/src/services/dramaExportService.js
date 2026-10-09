@@ -3,7 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const AdmZip = require('adm-zip');
 
-const EXPORT_VERSION = '1.4';  // 1.4: 完整导出分镜图片历史（含首尾帧 first/last 绑定）、frame_prompts、layout_description 等，支持导入后恢复首尾帧模式数据
+const EXPORT_VERSION = '1.5';  // 1.4: 完整导出分镜图片历史（含首尾帧 first/last 绑定）、frame_prompts、layout_description 等，支持导入后恢复首尾帧模式数据
 
 function getStoragePath(cfg) {
   const raw = cfg?.storage?.local_path || './data/storage';
@@ -200,7 +200,16 @@ function exportDrama(db, cfg, log, dramaId) {
   // 收集 extra_images 需要打包的文件：{ localRelPath, zipPath }
   const extraFilesToPack = [];
 
+  const assetImages = db.prepare("SELECT * FROM image_generations WHERE drama_id = ? AND storyboard_id IS NULL AND deleted_at IS NULL AND status = 'completed' AND local_path IS NOT NULL").all(Number(dramaId));
+  const assetHistory = assetImages.map(ig => {
+    const zip_file = 'media/image-history/ig_' + ig.id + extOf(ig.local_path);
+    extraFilesToPack.push({ localRelPath: ig.local_path, zipPath: zip_file });
+    return { ...require('./localImageService').metadataFields(ig), provider: ig.provider, prompt: ig.prompt, negative_prompt: ig.negative_prompt, model: ig.model, frame_type: ig.frame_type, size: ig.size, quality: ig.quality, generation_mode: ig.generation_mode, created_at: ig.created_at, completed_at: ig.completed_at, zip_file,
+      character_index: ig.character_id ? characters.findIndex(c => c.id === ig.character_id) : null,
+      scene_index: ig.scene_id ? dedupedScenes.findIndex(scene => scene.id === ig.scene_id) : null };
+  });
   const zipData = {
+    asset_image_generations: assetHistory,
     version: EXPORT_VERSION,
     exported_at: new Date().toISOString(),
     drama: {
@@ -294,6 +303,8 @@ function exportDrama(db, cfg, log, dramaId) {
             narration_audio_file: sbNarrationAudioFile,
             // 完整分镜图片历史（含首尾帧），导入后可恢复 getSbAllImages + 绑定
             image_generations: igsForThis.map(ig => ({
+              ...require('./localImageService').metadataFields(ig),
+              generation_mode: ig.generation_mode,
               original_id: ig.id,
               provider: ig.provider || 'imported',
               prompt: ig.prompt || null,

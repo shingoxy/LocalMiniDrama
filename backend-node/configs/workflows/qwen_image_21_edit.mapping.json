@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "key": "qwen_image_21_edit",
+  "source_file": "【Qwen Image 2.1】图像生成大合集.json",
+  "source_sha256": "98ccdf09514c40bf11204de15776ff2c566661d4c5ec5a00baf4c37c11b43c0a",
+  "model_key": "local:qwen-image-2.1",
+  "mode": "edit",
+  "max_references": 6,
+  "size_multiple": 32,
+  "reference_node": "5",
+  "reference_input_prefix": "images.image_",
+  "first_reference_canvas": true,
+  "model_node": "1",
+  "fields": {
+    "prompt": {
+      "node": "5",
+      "input": "prompt"
+    },
+    "negative_prompt": {
+      "node": "5",
+      "input": "negative_prompt"
+    },
+    "seed": {
+      "node": "6",
+      "input": "seed"
+    },
+    "width": {
+      "node": "4",
+      "input": "width"
+    },
+    "height": {
+      "node": "4",
+      "input": "height"
+    },
+    "output": {
+      "node": "8",
+      "input": "filename_prefix"
+    }
+  },
+  "notes": "Installed GGUF/8B branch; editing samples the encoder latent on the first-reference canvas to avoid spatial shifts. EmptyLatentImage t2i uses native KSampler channel/downscale adaptation. No default LoRA."
+}

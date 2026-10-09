@@ -22,8 +22,8 @@ function build(db, shot = {}, body = {}) {
     last_frame_intent: shot.result || '',
     ...saved,
     duration: Number(body.duration || shot.duration) > 0 ? Number(body.duration || shot.duration) : 5,
-    reference_image: imageKey(body.first_frame_url || body.image_url || shot.composed_image || shot.image_url || ''),
-    last_frame: imageKey(body.last_frame_url || shot.last_frame_image_url || ''),
+    reference_image: imageKey(body.first_frame_url || body.first_frame_local_path || body.image_url || shot.composed_image || shot.image_url || ''),
+    last_frame: imageKey(('last_frame_url' in body || 'last_frame_local_path' in body) ? body.last_frame_url || body.last_frame_local_path || '' : shot.last_frame_local_path || shot.last_frame_image_url || ''),
   };
 }
 function hash(intent, mode) { return createHash('sha256').update(JSON.stringify({ intent, mode })).digest('hex'); }

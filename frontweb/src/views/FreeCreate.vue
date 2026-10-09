@@ -7,6 +7,7 @@
           返回
         </el-button>
         <h2 class="page-title">自由创作</h2>
+        <ImageModelSelector :drama-id="0" />
       </div>
       <p class="page-desc">不绑定剧集，直接输入文字生成图片或视频</p>
     </div>
@@ -145,6 +146,7 @@
 </template>
 
 <script setup>
+import ImageModelSelector from '@/components/ImageModelSelector.vue'
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { ArrowLeft, Picture, MagicStick, Loading, CircleClose } from '@element-plus/icons-vue'

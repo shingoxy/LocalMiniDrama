@@ -24,8 +24,10 @@ function getResourceTasks(db, log) {
 }
 
 function cancelTaskStatus(db, log) {
-  return (req, res) => {
+  return async (req, res) => {
     try {
+      const image = db.prepare("SELECT id FROM image_generations WHERE task_id = ? AND engine = 'comfyui' AND deleted_at IS NULL").get(req.params.task_id);
+      if (image) await require('../services/localImageService').cancel(db, image.id);
       const result = taskService.cancelTask(db, log, req.params.task_id, req.body?.reason);
       if (!result.ok && result.reason === 'not_found') {
         return response.notFound(res, '任务不存在');

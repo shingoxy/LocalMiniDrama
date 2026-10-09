@@ -43,11 +43,12 @@ function appendPrompt(base, extra) {
   return current + ', ' + add;
 }
 
-function generateCharacterImage(db, log, cfg, characterId, modelName, style) {
+function generateCharacterImage(db, log, cfg, characterId, modelName, style, imageOptions = {}) {
   const charRow = db.prepare(
     'SELECT id, drama_id, name, appearance, description, negative_prompt FROM characters WHERE id = ? AND deleted_at IS NULL'
   ).get(Number(characterId));
   if (!charRow) return { ok: false, error: 'character not found' };
+  require('./imageModelSelection').projectId(db, { drama_id: imageOptions.drama_id, character_id: characterId });
   const drama = db.prepare('SELECT id, style, metadata FROM dramas WHERE id = ? AND deleted_at IS NULL').get(charRow.drama_id);
   if (!drama) return { ok: false, error: 'unauthorized' };
 
@@ -87,6 +88,7 @@ function generateCharacterImage(db, log, cfg, characterId, modelName, style) {
   imageSize = imageSize || '1920x1920';
   const userNeg = imageClient.resolveAssetUserNegativeForApi(modelName, charRow.negative_prompt);
   const imageGen = imageClient.createAndGenerateImage(db, log, {
+    ...require('./localImageService').requestOptions(imageOptions),
     drama_id: charRow.drama_id,
     character_id: charRow.id,
     prompt,
@@ -350,7 +352,7 @@ function deleteCharacter(db, log, characterId) {
 /**
  * 批量生成角色图片（与 Go BatchGenerateCharacterImages 对齐：为每个角色单独起一个异步任务并发生成）
  */
-function batchGenerateCharacterImages(db, log, cfg, characterIds, modelName, style) {
+function batchGenerateCharacterImages(db, log, cfg, characterIds, modelName, style, imageOptions = {}) {
   const ids = Array.isArray(characterIds) ? characterIds.map((id) => String(id)) : [];
   if (ids.length === 0) return { ok: false, error: 'character_ids 不能为空' };
   if (ids.length > 10) return { ok: false, error: '单次最多生成10个角色' };
@@ -360,7 +362,7 @@ function batchGenerateCharacterImages(db, log, cfg, characterIds, modelName, sty
     const charId = characterId;
     setImmediate(async () => {
       try {
-        const out = await generateCharacterFourViewImage(db, log, cfg, charId, modelName, style);
+        const out = await generateCharacterFourViewImage(db, log, cfg, charId, modelName, style, imageOptions);
         if (!out.ok) {
           log.warn('Batch character four-view skip', { character_id: charId, error: out.error });
           return;
@@ -529,11 +531,12 @@ async function generateCharacterPromptOnly(db, log, cfg, characterId, modelName,
   return { ok: true, polished_prompt: polishedPrompt };
 }
 
-async function generateCharacterFourViewImage(db, log, cfg, characterId, modelName, style) {
+async function generateCharacterFourViewImage(db, log, cfg, characterId, modelName, style, imageOptions = {}) {
   const charRow = db.prepare(
     'SELECT id, drama_id, name, appearance, description, polished_prompt, negative_prompt FROM characters WHERE id = ? AND deleted_at IS NULL'
   ).get(Number(characterId));
   if (!charRow) return { ok: false, error: 'character not found' };
+  require('./imageModelSelection').projectId(db, { drama_id: imageOptions.drama_id, character_id: characterId });
   const dramaFull = db.prepare('SELECT id, style, metadata FROM dramas WHERE id = ? AND deleted_at IS NULL').get(charRow.drama_id);
   if (!dramaFull) return { ok: false, error: 'unauthorized' };
 
@@ -589,6 +592,7 @@ async function generateCharacterFourViewImage(db, log, cfg, characterId, modelNa
 
   const userNeg = imageClient.resolveAssetUserNegativeForApi(modelName, charRow.negative_prompt);
   const imageGen = imageClient.createAndGenerateImage(db, log, {
+    ...require('./localImageService').requestOptions(imageOptions),
     drama_id: charRow.drama_id,
     character_id: charRow.id,
     prompt: imagePrompt,

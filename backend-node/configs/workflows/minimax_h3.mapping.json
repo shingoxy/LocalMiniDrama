@@ -3,7 +3,8 @@
   "engine": "minimax-h3",
   "mode": "I2VA",
   "supported_modes": [
-    "I2VA"
+    "I2VA",
+    "FL2VA"
   ],
   "source_file": "图+文-视频生成-MinMaxH3-Auto短剧.json",
   "source_sha256": "b9e80159a663822ceb35d8ae470d6cce70621130c1c19dc6a530769a7a05befb",
@@ -70,5 +71,5 @@
     "105_144",
     "105_145"
   ],
-  "notes": "Saved current graph; first image is resized as in the original graph, dimensions follow that image. Native audio is generated, external audio/last frame are not connected."
+  "notes": "Saved current graph; first image is resized as in the original graph, dimensions follow that image. Native audio is generated, external audio/last frame are not connected. FL2VA adds an uploaded last frame resized to the first frame target; sampler/loader parameters remain unchanged."
 }

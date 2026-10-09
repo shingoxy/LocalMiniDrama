@@ -24,7 +24,8 @@ function createApp() {
   const taskService = require('./services/taskService');
   const mergeService = require('./services/videoMergeService');
   const resumableMergeTasks = mergeService.resumeProcessingVideoMerges(db, log, config.storage?.base_url);
-  taskService.failOrphanedAsyncTasksOnStartup(db, log, resumableMergeTasks);
+  const resumableImageTasks = require('./services/localImageService').recover(db, log);
+  taskService.failOrphanedAsyncTasksOnStartup(db, log, [...resumableMergeTasks, ...resumableImageTasks]);
 
   const { resumeProcessingVideoGenerations } = require('./services/videoService');
   resumeProcessingVideoGenerations(db, log);

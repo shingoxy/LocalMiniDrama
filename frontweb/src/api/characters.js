@@ -1,21 +1,23 @@
 import request from '@/utils/request'
+import { withImageOptions } from '@/utils/imageRequestOptions'
 
 export const characterAPI = {
   get(characterId) {
     return request.get(`/characters/${characterId}`)
   },
-  generateImage(characterId, model, style) {
-    return request.post(`/characters/${characterId}/generate-image`, { model, style })
+  generateImage(characterId, model, style, imageOptions = {}) {
+    return request.post(`/characters/${characterId}/generate-image`, withImageOptions({ model, style, ...imageOptions }, 'character'))
   },
   generatePrompt(characterId, model, style) {
     return request.post(`/characters/${characterId}/generate-prompt`, { model, style })
   },
-  batchGenerateImages(characterIds, model, style) {
-    return request.post('/characters/batch-generate-images', {
+  batchGenerateImages(characterIds, model, style, imageOptions = {}) {
+    return request.post('/characters/batch-generate-images', withImageOptions({
       character_ids: characterIds.map(String),
       model,
-      style
-    })
+      style,
+      ...imageOptions
+    }, 'character'))
   },
   update(characterId, data) {
     return request.put(`/characters/${characterId}`, data)

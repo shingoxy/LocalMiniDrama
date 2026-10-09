@@ -388,6 +388,10 @@ function _doImport(db, storagePath, files, data, d, title, metaStr, now, log) {
               gen.completed_at || now
             );
             const newGenId = genInfo.lastInsertRowid;
+            const fields = require('./localImageService').FIELDS;
+            db.prepare('UPDATE image_generations SET ' + fields.map(k => k + ' = ?').join(', ') + ' WHERE id = ?').run(
+              ...fields.map(k => k === 'generation_metadata' ? JSON.stringify({ ...gen[k], resumable: false }) : k === 'provider_task_id' ? null : gen[k] ?? null), newGenId);
+            db.prepare('UPDATE image_generations SET generation_mode = ?, image_url = ? WHERE id = ?').run(gen.generation_mode || null, '/static/' + genLocalPath, newGenId);
             if (gen.original_id != null) {
               genOldToNew.set(Number(gen.original_id), { newId: newGenId, localPath: genLocalPath });
             }
@@ -453,6 +457,14 @@ function _doImport(db, storagePath, files, data, d, title, metaStr, now, log) {
   }
 
   log.info('Drama imported', { drama_id: dramaId, title });
+  for (const gen of data.asset_image_generations || []) {
+    const localPath = saveMediaFile(storagePath, projectDir, 'images', files, gen.zip_file, 'asset_imp_gen');
+    if (!localPath) continue;
+    const fields = require('./localImageService').FIELDS;
+    const columns = ['drama_id', 'character_id', 'scene_id', 'provider', 'model', 'prompt', 'negative_prompt', 'frame_type', 'size', 'quality', 'generation_mode', 'status', 'local_path', 'image_url', 'created_at', 'updated_at', 'completed_at', ...fields];
+    const values = [dramaId, gen.character_index != null ? charNewIds[gen.character_index] || null : null, gen.scene_index != null ? sceneNewIds[gen.scene_index] || null : null, gen.provider || 'imported', gen.model || null, gen.prompt || '', gen.negative_prompt || null, gen.frame_type || null, gen.size || null, gen.quality || null, gen.generation_mode || null, 'completed', localPath, '/static/' + localPath, gen.created_at || now, now, gen.completed_at || now, ...fields.map(k => k === 'generation_metadata' ? JSON.stringify({ ...gen[k], resumable: false }) : k === 'provider_task_id' ? null : gen[k] ?? null)];
+    db.prepare('INSERT INTO image_generations (' + columns.join(',') + ') VALUES (' + columns.map(() => '?').join(',') + ')').run(...values);
+  }
   return { drama_id: dramaId, title };
 }
 

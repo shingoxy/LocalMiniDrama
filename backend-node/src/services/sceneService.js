@@ -310,11 +310,12 @@ async function generateSceneSinglePromptOnly(db, log, cfg, sceneId, modelName, s
  * Step 2: 图片AI根据描述生成 16:9 四格场景参考图
  * 如果已有 polished_prompt（预生成的完整提示词），直接使用，跳过 Step 1
  */
-async function generateSceneFourViewImage(db, log, cfg, sceneId, modelName, style) {
+async function generateSceneFourViewImage(db, log, cfg, sceneId, modelName, style, imageOptions = {}) {
   const sceneRow = db.prepare(
     'SELECT id, drama_id, location, time, prompt, polished_prompt FROM scenes WHERE id = ? AND deleted_at IS NULL'
   ).get(Number(sceneId));
   if (!sceneRow) return { ok: false, error: 'scene not found' };
+  require('./imageModelSelection').projectId(db, { drama_id: imageOptions.drama_id, scene_id: sceneId });
   const dramaFull = db.prepare('SELECT id, style, metadata FROM dramas WHERE id = ? AND deleted_at IS NULL').get(sceneRow.drama_id);
   if (!dramaFull) return { ok: false, error: 'unauthorized' };
 
@@ -367,6 +368,7 @@ async function generateSceneFourViewImage(db, log, cfg, sceneId, modelName, styl
   }
 
   const imageGen = imageClient.createAndGenerateImage(db, log, {
+    ...require('./localImageService').requestOptions(imageOptions),
     drama_id: sceneRow.drama_id,
     scene_id: sceneId,
     prompt: imagePrompt,
@@ -386,11 +388,12 @@ async function generateSceneFourViewImage(db, log, cfg, sceneId, modelName, styl
  * Step 1: 文本AI将 location/time/prompt 转换为单图场景描述
  * Step 2: 图片AI根据描述生成单张场景参考图
  */
-async function generateSceneSingleImage(db, log, cfg, sceneId, modelName, style) {
+async function generateSceneSingleImage(db, log, cfg, sceneId, modelName, style, imageOptions = {}) {
   const sceneRow = db.prepare(
     'SELECT id, drama_id, location, time, prompt, polished_prompt, polished_prompt_single FROM scenes WHERE id = ? AND deleted_at IS NULL'
   ).get(Number(sceneId));
   if (!sceneRow) return { ok: false, error: 'scene not found' };
+  require('./imageModelSelection').projectId(db, { drama_id: imageOptions.drama_id, scene_id: sceneId });
   const dramaFull = db.prepare('SELECT id, style, metadata FROM dramas WHERE id = ? AND deleted_at IS NULL').get(sceneRow.drama_id);
   if (!dramaFull) return { ok: false, error: 'unauthorized' };
 
@@ -444,6 +447,7 @@ async function generateSceneSingleImage(db, log, cfg, sceneId, modelName, style)
   }
 
   const imageGen = imageClient.createAndGenerateImage(db, log, {
+    ...require('./localImageService').requestOptions(imageOptions),
     drama_id: sceneRow.drama_id,
     scene_id: sceneId,
     prompt: imagePrompt,

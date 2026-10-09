@@ -20,6 +20,7 @@
         </div>
         <!-- 右侧操作区 -->
         <div class="header-actions">
+          <ImageModelSelector :drama-id="0" />
           <!-- 暂时隐藏，功能待完善 -->
           <!-- <el-button class="btn-library" title="自由创作" @click="$router.push('/free-create')">
             <el-icon><MagicStick /></el-icon>自由创作
@@ -353,6 +354,7 @@
 </template>
 
 <script setup>
+import ImageModelSelector from '@/components/ImageModelSelector.vue'
 import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'

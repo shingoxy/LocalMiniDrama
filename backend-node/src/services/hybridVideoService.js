@@ -18,7 +18,7 @@ function prepare(db, body) {
   const fingerprint = createHash('sha256').update(JSON.stringify({
     storyboard_id: ctx.shot?.id || null, drama_id: ctx.project?.id || null,
     selection: selection.key, duration, resolution,
-    intent: intents.hash(intents.build(db,ctx.shot || {},{duration}),selection.local ? comfy.loadTemplate().mapping.mode : 'cloud'),
+    intent: intents.hash(selection.local ? intent : intents.build(db,ctx.shot || {},{duration}),selection.local ? intent.last_frame ? 'FL2VA' : 'I2VA' : 'cloud'),
     free_prompt: ctx.shot ? null : body.prompt,
   })).digest('hex');
   return { ctx, selection, duration, resolution, intent, fingerprint,
@@ -63,11 +63,13 @@ async function prepareSubmission(db,body) {
   const p = prepare(db,body);
   if (p.selection.local) {
     if (p.duration < 4 || p.duration > 15) throw new Error('当前 H3 Workflow 支持 4–15 秒，请调整该 Shot 的时长');
-    if (body.last_frame_url || body.last_frame_local_path || body.audio) throw new Error('当前 H3 Workflow 未连接尾帧/外部音频');
+    if (body.audio) throw new Error('当前 H3 Workflow 未连接外部音频');
     await comfy.connection(cost.settings(db).comfy_url);
   }
   consumeQuote(db,body,p);
   return { prepared:p, body:{ ...body, provider:p.selection.provider, model:p.selection.model, config_id:p.selection.config_id,
+    first_frame_url: p.selection.local ? p.intent.reference_image : body.first_frame_url,
+    last_frame_url: p.selection.local ? p.intent.last_frame || null : body.last_frame_url,
     duration:p.duration, resolution:p.resolution, drama_id:p.ctx.project?.id || body.drama_id,
     prompt:p.selection.local ? body.prompt || p.intent.original_prompt : adapters.cloudPrompt(p.selection.model,p.intent,body.prompt) } };
 }
@@ -133,12 +135,13 @@ async function runLocal(db,log,id,resume=false) {
     if (!promptId) {
       if (!row.storyboard_id) throw new Error('本地 H3 需要关联 Shot');
       await comfy.connection(address);
-      const optimized = await optimize(db,log,row.storyboard_id,{duration:row.duration,first_frame_url:row.first_frame_url || row.image_url});
+      const optimized = await optimize(db,log,row.storyboard_id,{duration:row.duration,first_frame_url:row.first_frame_url || row.image_url,last_frame_url:row.last_frame_url || null});
       const cfg = require('../config').loadConfig();
       const root = path.resolve(cfg.storage.local_path || './data/storage');
       const intent = meta.intent || optimized.intent;
       const image = await comfy.upload(address,comfy.localImage(row.first_frame_url || row.image_url || intent.reference_image,root));
-      const bound = comfy.bindWorkflow({ ...meta.input,prompt:optimized.prompt,image,duration:row.duration,seed:row.seed,last_frame:row.last_frame_url });
+      const lastFrame = row.last_frame_url ? await comfy.upload(address,comfy.localImage(row.last_frame_url,root)) : null;
+      const bound = comfy.bindWorkflow({ ...meta.input,prompt:optimized.prompt,image,duration:row.duration,seed:row.seed,last_frame:lastFrame });
       meta.client_id = randomUUID();
       stopProgress = comfy.watchProgress(address,meta.client_id,()=>promptId,progress=>{sampling=progress;});
       const response = await comfy.request(address,'/prompt',{prompt:bound.workflow,client_id:meta.client_id});

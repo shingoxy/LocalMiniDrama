@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { withImageOptions } from '@/utils/imageRequestOptions'
 
 export const sceneAPI = {
   get(sceneId) {
@@ -14,7 +15,7 @@ export const sceneAPI = {
     return request.post('/scenes', data)
   },
   generateImage(data) {
-    return request.post('/scenes/generate-image', data)
+    return request.post('/scenes/generate-image', withImageOptions(data, 'scene'))
   },
   update(sceneId, data) {
     return request.put(`/scenes/${sceneId}`, data)
@@ -37,7 +38,7 @@ export const sceneAPI = {
   putRefImage(sceneId, refImagePath) {
     return request.put(`/scenes/${sceneId}`, { ref_image: refImagePath ?? null })
   },
-  generateFourViewImage(sceneId, model, style) {
-    return request.post(`/scenes/${sceneId}/generate-four-view-image`, { model, style })
+  generateFourViewImage(sceneId, model, style, imageOptions = {}) {
+    return request.post(`/scenes/${sceneId}/generate-four-view-image`, withImageOptions({ model, style, ...imageOptions }, 'scene'))
   }
 }

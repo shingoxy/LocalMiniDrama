@@ -1460,11 +1460,14 @@ async function callImageApi(db, log, opts) {
     user_negative_prompt,
   } = opts;
   const preferredProvider = preferred_provider ?? opts.preferredProvider;
-  const config = getDefaultImageConfig(db, preferredModel, preferredProvider, imageServiceType);
+  const selection = require('./imageModelSelection').resolve(db, opts);
+  if (selection?.local) throw new Error('本地图片须通过本地任务入口执行');
+  const config = selection ? aiConfigService.getConfig(db, selection.config_id) : getDefaultImageConfig(db, preferredModel, preferredProvider, imageServiceType);
+  if (selection && (!config?.is_active || !(Array.isArray(config.model) ? config.model : [config.model]).includes(selection.model))) throw new Error('所选云端图片配置已变化，请重新选择');
   if (!config) {
     throw new Error('未配置图片模型，请在「AI 配置」中添加 image 类型且已启用的配置');
   }
-  const model = getModelFromConfig(config, preferredModel);
+  const model = getModelFromConfig(config, selection?.model || preferredModel);
   const provider = (config.provider || '').toLowerCase();
   // api_protocol 显式指定接口规范，优先级高于 provider 推断；未设置时按 provider 自动判断
   const protocol = (config.api_protocol || '').toLowerCase() || inferProtocol(provider, model);
@@ -1677,6 +1680,10 @@ async function callImageApi(db, log, opts) {
  * 与场景图一致：创建 task 并写入 task_id，便于前端轮询 /tasks/:task_id 获知完成或报错。
  */
 function createAndGenerateImage(db, log, opts) {
+  const localImages = require('./localImageService');
+  const prepared = localImages.prepare(db, opts);
+  if (prepared.selection?.local) return require('./imageService').create(db, log, { ...opts, image_model_key: prepared.selection.key, local_size_explicit: false });
+  if (prepared.selection) opts = { ...opts, model: prepared.selection.model, image_model_key: prepared.selection.key };
   const {
     drama_id,
     character_id,
@@ -1734,10 +1741,12 @@ function createAndGenerateImage(db, log, opts) {
     }
   }
 
+  localImages.record(db, imageGenId, prepared);
   setImmediate(async () => {
     try {
       db.prepare('UPDATE image_generations SET status = ? WHERE id = ?').run('processing', imageGenId);
       const result = await callImageApi(db, log, {
+        ...opts,
         prompt,
         model,
         size,
@@ -1902,6 +1911,7 @@ function rowToItem(r) {
     provider: r.provider,
     prompt: r.prompt,
     model: r.model,
+    ...require('./localImageService').metadataFields(r),
     size: r.size,
     quality: r.quality,
     image_url: r.image_url,

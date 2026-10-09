@@ -30,6 +30,7 @@
         <span v-else-if="layoutSaveState === 'error'" class="layout-status error">保存失败</span>
 
         <div class="header-actions">
+          <ImageModelSelector :drama-id="Number(dramaId) || 0" @selected="loadDrama()" />
           <el-button size="small" type="warning" plain @click="focusScriptNode">
             剧本
           </el-button>
@@ -259,6 +260,7 @@
 </template>
 
 <script setup>
+import ImageModelSelector from '@/components/ImageModelSelector.vue'
 import { computed, markRaw, nextTick, onBeforeUnmount, provide, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { VueFlow } from '@vue-flow/core'

@@ -35,6 +35,7 @@
           画布模式
         </el-button>
         <div class="header-actions">
+          <ImageModelSelector :drama-id="Number(dramaId) || 0" @selected="loadDrama()" />
           <el-button class="btn-theme" :title="isDark ? '切换到浅色模式' : '切换到暗色模式'" @click="toggleTheme">
             <el-icon><Sunny v-if="isDark" /><Moon v-else /></el-icon>
             {{ isDark ? '浅色' : '暗色' }}
@@ -2645,6 +2646,7 @@
 </template>
 
 <script setup>
+import ImageModelSelector from '@/components/ImageModelSelector.vue'
 import { ref, computed, onMounted, onBeforeUnmount, watch, reactive, nextTick } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { storeToRefs } from 'pinia'

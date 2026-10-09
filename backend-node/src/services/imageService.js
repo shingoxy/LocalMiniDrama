@@ -5,6 +5,7 @@ function list(db, query) {
     sql += ' AND drama_id = ?';
     params.push(query.drama_id);
   }
+  for (const key of ['engine', 'character_id', 'scene_id']) if (query[key] != null && query[key] !== '') { sql += ' AND ' + key + ' = ?'; params.push(query[key]); }
   if (query.storyboard_id) {
     sql += ' AND storyboard_id = ?';
     params.push(query.storyboard_id);
@@ -35,7 +36,11 @@ function rowToItem(r) {
     character_id: r.character_id,
     provider: r.provider,
     prompt: r.prompt,
+    negative_prompt: r.negative_prompt,
+    size: r.size,
+    reference_images: r.reference_images,
     model: r.model,
+    ...require('./localImageService').metadataFields(r),
     image_url: r.image_url,
     local_path: r.local_path,
     original_url: r.original_url,
@@ -534,6 +539,9 @@ function mergePromptWithStyle(prompt, style) {
 }
 
 function create(db, log, req) {
+  const localImages = require('./localImageService');
+  const prepared = localImages.prepare(db, { ...req, local_size_explicit: req.local_size_explicit ?? !!req.size });
+  if (prepared.selection) req = { ...req, drama_id: require('./imageModelSelection').projectId(db, req), model: prepared.selection.model };
   const now = new Date().toISOString();
   const task = taskService.createTask(db, log, 'image_generation', String(req.drama_id || ''));
   const taskId = task.id;
@@ -558,12 +566,13 @@ function create(db, log, req) {
   }
   const useFirstFrameLayoutLock = resolveUseFirstFrameLayoutLock(req, frameType);
   const info = db.prepare(
-    `INSERT INTO image_generations (storyboard_id, drama_id, scene_id, provider, prompt, negative_prompt, model, frame_type, reference_images, use_first_frame_layout_lock, size, status, task_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+    `INSERT INTO image_generations (storyboard_id, drama_id, scene_id, character_id, provider, prompt, negative_prompt, model, frame_type, reference_images, use_first_frame_layout_lock, size, status, task_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
   ).run(
     req.storyboard_id ?? null,
     Number(req.drama_id) || 0,
     sceneId,
+    req.character_id != null ? Number(req.character_id) : null,
     req.provider || 'openai',
     mergedPrompt,
     req.negative_prompt ?? null,
@@ -578,6 +587,7 @@ function create(db, log, req) {
   );
   const imageGenId = info.lastInsertRowid;
   if (!imageGenId) throw new Error('insert failed');
+  localImages.record(db, imageGenId, prepared);
   setImmediate(() => {
     processImageGeneration(db, log, imageGenId);
   });
@@ -600,6 +610,8 @@ async function processImageGeneration(db, log, imageGenId) {
     log.info('[图生] 已被处理，跳过', { id: imageGenId, status: row.status });
     return;
   }
+
+  if (row.engine === 'comfyui') return require('./localImageService').run(db, log, row.id);
 
   log.info('[图生] ▶ 开始', {
     id: imageGenId,
@@ -698,7 +710,7 @@ async function processImageGeneration(db, log, imageGenId) {
     }
 
     // ── Step 1: 获取 AI 配置 ──────────────────────────────────────────
-    const config = imageClient.getDefaultImageConfig(db, row.model, null, imageServiceType);
+    const config = row.model_key?.startsWith('cloud:') ? require('./aiConfigService').getConfig(db, Number(row.model_key.split(':')[1])) : imageClient.getDefaultImageConfig(db, row.model, null, imageServiceType);
     if (!config) {
       log.error('[图生] ✗ 未找到图片 AI 配置', { id: imageGenId, imageServiceType, elapsed: elapsed() });
       db.prepare('UPDATE image_generations SET status = ?, error_msg = ?, updated_at = ? WHERE id = ?').run(
@@ -1376,6 +1388,7 @@ async function processImageGeneration(db, log, imageGenId) {
       character_id: row.character_id,
       image_gen_id: imageGenId,
       imageServiceType,
+      image_model_key: row.model_key,
       reference_image_urls: reference_image_urls || undefined,
       files_base_url: filesBaseUrl,
       storage_local_path: storageLocalPath,
@@ -1689,4 +1702,8 @@ module.exports = {
   processImageGeneration,
   aspectRatioToSize,
   syncStoryboardCharacters,
+  buildQuadGridPrompt,
+  buildNineGridPrompt,
+  splitQuadGridToImages,
+  splitNineGridToImages,
 };

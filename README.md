@@ -22,6 +22,7 @@
 | AI Provider | 沿用现有文本、图片、视频接口；包括 DeepSeek、Seedream、Seedance、Kling 等配置与协议 |
 | 混合视频 | 每个 Shot 单独选模型，项目默认、整集与多选批量设置，按 Shot 路由生成 |
 | 本地 H3 | 直接连接现有 ComfyUI，提交 Workflow，Queue / Progress / History / Cancel，取回 MP4 |
+| 本地图片 | 可选 Qwen-Image 2.1 / Flux.1-dev，人物、场景、首尾帧候选，历史、预览选用与任务恢复；[使用说明](docs/local-images.md) |
 | Prompt Adapter | Universal Shot Intent，DeepSeek 转换 H3 Prompt，缓存与手工编辑保护 |
 | 成本管理 | 模型价格、月费分摊、重试预算、本机耗时、电费、单集与整季预测 |
 | 最终合成 | 复用已有 FFmpeg Pipeline、字幕、音频、水印与视频合成 |

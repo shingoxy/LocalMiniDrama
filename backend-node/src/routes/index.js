@@ -25,6 +25,7 @@ const sceneModelMapRoutes = require('./sceneModelMap');
 function setupRouter(cfg, db, log) {
   const r = express.Router();
   require('./hybridVideo').mount(r, db, log);
+  require('./localImages').mount(r, db, log);
   const drama = dramaRoutes(db, cfg, log);
   const task = taskRoutes(db, log);
   const settings = settingsRoutes(db, cfg, log);

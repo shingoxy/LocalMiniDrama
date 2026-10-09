@@ -35,8 +35,12 @@ function routes(db, cfg, log) {
         response.internalError(res, err.message);
       }
     },
-    delete: (req, res) => {
+    delete: async (req, res) => {
       try {
+        const row = db.prepare('SELECT * FROM image_generations WHERE id = ? AND deleted_at IS NULL').get(Number(req.params.id));
+        if (row?.engine === 'comfyui' && (['pending', 'processing'].includes(row.status) || require('../services/storageLayout').parseMetadata(row.generation_metadata).resumable)) {
+          await require('../services/localImageService').cancel(db, row.id);
+        }
         const ok = imageService.deleteById(db, log, req.params.id);
         if (!ok) return response.notFound(res, '记录不存在');
         response.success(res, { message: '删除成功' });

@@ -310,6 +310,10 @@ function ensureAllColumns(database) {
 
   // --- image_generations ---
   ensureColumns(database, 'image_generations', [
+    ...['engine', 'model_key', 'workflow_key', 'provider_task_id', 'generation_metadata'].map(name => ({ name, type: 'TEXT' })),
+    { name: 'workflow_version', type: 'INTEGER' },
+    { name: 'seed', type: 'INTEGER' },
+    { name: 'generation_elapsed_seconds', type: 'REAL' },
     { name: 'storyboard_id',    type: 'INTEGER' },
     { name: 'drama_id',         type: 'INTEGER' },
     { name: 'episode_id',       type: 'INTEGER' },

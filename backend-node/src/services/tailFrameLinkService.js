@@ -30,10 +30,11 @@ function routes(db, cfg, log) {
         }
 
         // 2. 找到下一个分镜
-        const currentSb = db.prepare('SELECT episode_id, storyboard_number FROM storyboards WHERE id = ?').get(storyboardId);
+        const currentSb = db.prepare('SELECT s.episode_id, s.storyboard_number, e.drama_id FROM storyboards s JOIN episodes e ON e.id=s.episode_id WHERE s.id = ? AND s.deleted_at IS NULL AND e.deleted_at IS NULL').get(storyboardId);
         if (!currentSb) {
           return res.status(404).json({ error: '分镜不存在' });
         }
+        if (Number(currentSb.drama_id) !== Number(dramaId)) return res.status(400).json({ error: '分镜不属于该项目' });
 
         const nextSb = db.prepare(`
           SELECT id, storyboard_number FROM storyboards
@@ -61,6 +62,8 @@ function routes(db, cfg, log) {
         const videoAbsPath = path.isAbsolute(video.local_path)
           ? video.local_path
           : path.join(storageBase, video.local_path.replace(/^\/+/, ''));
+        const relativeVideo = path.relative(path.resolve(storageBase), path.resolve(videoAbsPath));
+        if (relativeVideo.startsWith('..') || path.isAbsolute(relativeVideo)) return res.status(400).json({ error: '视频文件不在素材目录中' });
 
         if (!fs.existsSync(videoAbsPath)) {
           return res.status(400).json({ error: '视频文件不存在: ' + video.local_path });
@@ -77,7 +80,7 @@ function routes(db, cfg, log) {
         const outputRelPath = `media/images/${outputFileName}`;
 
         // 6. 使用 ffmpeg 提取最后一帧
-        // 使用 -sseof -1 定位到最后一秒，然后取第一帧
+        // Decode the final second and overwrite one image for every decoded frame, retaining the actual final frame.
         log.info('[尾帧衔接] 开始提取', { from: video.local_path, to: outputRelPath });
 
         const result = spawnSync(ffmpeg, [
@@ -85,10 +88,10 @@ function routes(db, cfg, log) {
           '-i', videoAbsPath,
           '-update', '1',
           '-q:v', '2',
-          '-frames:v', '1',
+          '-an',
           '-y',
           outputAbsPath
-        ], { encoding: 'utf8', timeout: 60000 });
+        ], { encoding: 'utf8', timeout: 60000, windowsHide: true });
 
         if (result.error || result.status !== 0) {
           log.error('[尾帧衔接] ffmpeg 失败', { stderr: result.stderr?.slice(-500) });
@@ -126,9 +129,7 @@ function routes(db, cfg, log) {
           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
-        // 假设有 files_base_url 配置
-        const filesBase = cfg?.files?.base_url || '';
-        const imageUrl = filesBase ? `${filesBase.replace(/\/$/, '')}/${outputRelPath}` : null;
+        const imageUrl = '/static/' + outputRelPath;
 
         const info = insert.run(
           dramaId,
@@ -153,11 +154,7 @@ function routes(db, cfg, log) {
         // 先获取当前首帧（用于历史记录，如果需要）
         const nextSbCurrent = db.prepare('SELECT first_frame_image_id, image_url, local_path FROM storyboards WHERE id = ?').get(nextSb.id);
 
-        db.prepare(`
-          UPDATE storyboards
-          SET first_frame_image_id = ?, image_url = ?, local_path = ?, updated_at = ?
-          WHERE id = ?
-        `).run(newImageId, imageUrl, outputRelPath, now, nextSb.id);
+        require('./storyboardFrameBinding').bindStoryboardFrameImage(db, nextSb.id, 'first', newImageId, imageUrl, outputRelPath);
 
         log.info('[尾帧衔接] 完成', {
           from_storyboard: storyboardId,
