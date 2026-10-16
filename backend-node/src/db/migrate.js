@@ -319,6 +319,7 @@ function ensureAllColumns(database) {
     { name: 'episode_id',       type: 'INTEGER' },
     { name: 'scene_id',         type: 'INTEGER' },
     { name: 'character_id',     type: 'INTEGER' },
+    { name: 'prop_id',          type: 'INTEGER' },
     { name: 'provider',         type: 'TEXT' },
     { name: 'prompt',           type: 'TEXT' },
     { name: 'negative_prompt',  type: 'TEXT' },

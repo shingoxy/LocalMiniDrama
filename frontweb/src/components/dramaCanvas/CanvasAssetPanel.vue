@@ -23,6 +23,11 @@
             <span>{{ nodeBusy?.message || '生成参考图…' }}</span>
           </div>
         </div>
+        <div v-if="candidate" class="candidate-preview">
+          <el-image v-if="mainImageUrl" :src="assetImageUrl(candidate)" :preview-src-list="[assetImageUrl(candidate)]" preview-teleported fit="contain" />
+          <span>候选 #{{ candidate.id }}，未选用</span>
+          <el-button size="small" type="primary" :loading="selecting" @click.stop="selectCandidate">选用</el-button>
+        </div>
         <div v-if="entityStatus" class="entity-status" :class="'st-' + entityStatus">{{ entityStatusLabel }}</div>
       </div>
 
@@ -117,13 +122,12 @@
     <div class="panel-actions">
       <el-button size="small" :loading="saving" @click.stop="saveAsset">保存</el-button>
       <el-button
-        v-if="canGenerate || generating"
         size="small"
         type="primary"
         :loading="generating"
         @click.stop="generateImage"
       >
-        生成参考图
+        {{ mainImageUrl ? '再生成候选' : '生成参考图' }}
       </el-button>
       <el-button size="small" plain @click.stop="highlightRelated">关联分镜</el-button>
       <el-button size="small" type="danger" plain @click.stop="deleteAsset">删除</el-button>
@@ -137,9 +141,10 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { characterAPI } from '@/api/characters'
 import { sceneAPI } from '@/api/scenes'
 import { propAPI } from '@/api/props'
+import { imagesAPI } from '@/api/images'
 import { useCanvasContext } from '@/composables/useCanvasContext'
 import { generateAssetReferenceImage } from '@/composables/useCanvasAssetGenerate'
-import { assetImageUrl } from '@/utils/mediaUrl'
+import { assetImageUrl, latestAssetCandidate } from '@/utils/mediaUrl'
 
 const props = defineProps({
   kind: { type: String, required: true },
@@ -150,6 +155,8 @@ const props = defineProps({
 const ctx = useCanvasContext()
 const saving = ref(false)
 const generating = ref(false)
+const candidates = ref([]), selecting = ref(false)
+let candidateRequest = 0
 const form = reactive({
   name: '',
   role: '',
@@ -170,8 +177,9 @@ const kindIcon = computed(() => {
   return map[props.kind] || '📦'
 })
 
-const previewUrl = computed(() => assetImageUrl(props.entity))
-const canGenerate = computed(() => !previewUrl.value)
+const mainImageUrl = computed(() => assetImageUrl(props.entity))
+const candidate = computed(() => latestAssetCandidate(candidates.value, props.kind, props.entity))
+const previewUrl = computed(() => mainImageUrl.value || assetImageUrl(candidate.value))
 const entityStatus = computed(() => props.entity?.status || '')
 const entityStatusLabel = computed(() => {
   const s = entityStatus.value
@@ -183,6 +191,30 @@ const nodeBusy = computed(() => {
   const map = ctx?.nodeStatus?.map
   return map ? map[props.nodeId] : null
 })
+
+async function loadCandidates() {
+  const request = ++candidateRequest
+  const field = { character: 'character_id', scene: 'scene_id', prop: 'prop_id' }[props.kind]
+  if (!field || !props.entity?.id || !props.entity?.drama_id) { candidates.value = []; return }
+  try {
+    const result = await imagesAPI.list({ drama_id: props.entity.drama_id, [field]: props.entity.id, engine: 'comfyui', model_key: 'local:qwen-image-2.1', status: 'completed', page_size: 10 })
+    if (request === candidateRequest) candidates.value = result.items || []
+  } catch (e) { if (request === candidateRequest) ElMessage.warning(e?.message || '候选图片加载失败') }
+}
+watch(() => [props.kind, props.entity?.id, props.entity?.drama_id], () => { candidates.value = []; loadCandidates() }, { immediate: true })
+watch(nodeBusy, (busy, previous) => { if (!busy && previous && !generating.value) loadCandidates() })
+
+async function selectCandidate() {
+  if (!candidate.value) return
+  selecting.value = true
+  try {
+    await imagesAPI.select(candidate.value.id)
+    await ctx?.refreshDrama?.(true)
+    await ctx?.refresh?.(true)
+    await loadCandidates()
+    ElMessage.success('已选用，原图保留在历史')
+  } catch (e) { ElMessage.error(e?.message || '选用失败') } finally { selecting.value = false }
+}
 
 function syncForm(entity) {
   form.name = entity?.name || ''
@@ -285,7 +317,8 @@ async function generateImage() {
       entity: props.entity,
       nodeId: props.nodeId,
     })
-    ElMessage.success('参考图已生成')
+    await loadCandidates()
+    ElMessage.success(candidate.value ? '候选已生成，请预览后选用' : '参考图已生成')
   } catch (e) {
     ElMessage.error(e?.message || '生成失败')
   } finally {
@@ -326,6 +359,8 @@ function highlightRelated() {
   flex-shrink: 0;
   width: 108px;
 }
+.candidate-preview { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; text-align: center; font-size: 10px; color: #a7f3d0; }
+.candidate-preview .el-image { width: 108px; height: 108px; }
 .preview-box {
   position: relative;
   width: 108px;

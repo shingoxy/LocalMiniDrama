@@ -12,7 +12,6 @@ function source(name) {
 }
 const q = source('qwen_image_2_1_Q8_0_t2i.json');
 const edit = source('【Qwen Image 2.1】图像生成大合集.json');
-const f = source('文+自动提示词-自动生图-Flux1Dev.json');
 function widget(src, id, index) {
   const n = src.graph.nodes.find(n => n.id === id && n.mode === 0);
   if (!n) throw new Error(`Missing active source node ${id}`);
@@ -48,19 +47,4 @@ for (const mode of ['t2i', 'edit']) {
     fields: { prompt: { node: '5', input: 'prompt' }, negative_prompt: { node: '5', input: 'negative_prompt' }, seed: { node: '6', input: 'seed' }, width: { node: '4', input: 'width' }, height: { node: '4', input: 'height' }, output: { node: '8', input: 'filename_prefix' } },
     notes: 'Installed GGUF/8B branch; editing samples the encoder latent on the first-reference canvas to avoid spatial shifts. EmptyLatentImage t2i uses native KSampler channel/downscale adaptation. No default LoRA.' }, mode === 'edit' ? edit : q);
 }
-const flux = {
-  '1': node('UNETLoader', { unet_name: widget(f, 20, 0), weight_dtype: widget(f, 20, 1) }),
-  '2': node('DualCLIPLoader', { clip_name1: widget(f, 19, 0), clip_name2: widget(f, 19, 1), type: widget(f, 19, 2), device: widget(f, 19, 3) }),
-  '3': node('VAELoader', { vae_name: widget(f, 26, 0) }),
-  '4': node('EmptySD3LatentImage', { width: 1024, height: 1024, batch_size: 1 }),
-  '5': node('CLIPTextEncode', { clip: ['2', 0], text: '' }),
-  '9': node('CLIPTextEncode', { clip: ['2', 0], text: '' }),
-  '10': node('FluxGuidance', { conditioning: ['5', 0], guidance: widget(f, 13, 0) }),
-  '6': node('KSampler', { model: ['1', 0], positive: ['10', 0], negative: ['9', 0], latent_image: ['4', 0], seed: 0, steps: widget(f, 22, 2), cfg: widget(f, 22, 3), sampler_name: widget(f, 22, 4), scheduler: widget(f, 22, 5), denoise: 1 }),
-  '7': node('VAEDecode', { samples: ['6', 0], vae: ['3', 0] }),
-  '8': node('SaveImage', { images: ['7', 0], filename_prefix: 'LocalMiniDrama/images' }),
-};
-write('flux1_dev_t2i', flux, { model_key: 'local:flux1-dev', mode: 't2i', max_references: 0, size_multiple: 16, model_node: '1',
-  fields: { prompt: { node: '5', input: 'text' }, negative_prompt: { node: '9', input: 'text' }, seed: { node: '6', input: 'seed' }, width: { node: '4', input: 'width' }, height: { node: '4', input: 'height' }, output: { node: '8', input: 'filename_prefix' } },
-  notes: 'Text-to-image only; optional user-selected identity LoRA, no private prompts or default LoRAs.' }, f);
-console.log('Exported Qwen generation/edit and Flux generation API graphs.');
+console.log('Exported Qwen generation/edit API graphs.');

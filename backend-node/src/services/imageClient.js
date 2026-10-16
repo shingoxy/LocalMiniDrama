@@ -1682,6 +1682,12 @@ async function callImageApi(db, log, opts) {
 function createAndGenerateImage(db, log, opts) {
   const localImages = require('./localImageService');
   const prepared = localImages.prepare(db, opts);
+  if (prepared.selection) {
+    const target = [['character_id', 'characters'], ['scene_id', 'scenes'], ['prop_id', 'props']].find(([field]) => opts[field]);
+    const storedNegative = target ? db.prepare(`SELECT negative_prompt FROM ${target[1]} WHERE id = ? AND deleted_at IS NULL`).get(Number(opts[target[0]]))?.negative_prompt : null;
+    const negative = opts.negative_prompt ?? opts.user_negative_prompt ?? storedNegative;
+    opts = { ...opts, negative_prompt: negative, user_negative_prompt: negative };
+  }
   if (prepared.selection?.local) return require('./imageService').create(db, log, { ...opts, image_model_key: prepared.selection.key, local_size_explicit: false });
   if (prepared.selection) opts = { ...opts, model: prepared.selection.model, image_model_key: prepared.selection.key };
   const {

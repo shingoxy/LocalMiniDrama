@@ -164,6 +164,7 @@ export function useCharacters(deps) {
       polished_prompt: char.polished_prompt || '',
       image_url: char.image_url || '',
       local_path: char.local_path || '',
+      image_candidate: char.image_candidate || null,
       ref_image: char.ref_image || '',
       identity_anchors: char.identity_anchors || '',
       stages: char.stages ? (typeof char.stages === 'string' ? char.stages : JSON.stringify(char.stages, null, 2)) : '',
@@ -342,11 +343,12 @@ export function useCharacters(deps) {
       const res = await characterAPI.generateImage(char.id, undefined, getSelectedStyle())
       const taskId = res?.image_generation?.task_id ?? res?.task_id
       if (taskId) {
-        const pollRes = await pollTask(taskId, () => loadDrama(), meta)
+        const pollRes = await pollTask(taskId, undefined, meta)
         if (pollRes?.status === 'failed') {
           char.errorMsg = pollRes.error || '生成失败'
-        } else {
-          ElMessage.success('角色图片已生成')
+        } else if (pollRes?.status === 'completed') {
+          await loadDrama()
+          ElMessage.success(pollRes.result?.result_usage === 'candidate' ? '角色候选已生成，请预览后选用' : '角色图片已生成')
         }
       } else {
         await loadDrama()

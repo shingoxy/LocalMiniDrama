@@ -51,12 +51,13 @@ function generateImage(db, log) {
     const model = req.body?.model != null ? String(req.body.model).trim() || null : null;
     const style = req.body?.style != null ? String(req.body.style).trim() || null : null;
     try {
-      const taskId = propImageGenerationService.generatePropImage(db, log, id, { model, style });
+      const taskId = propImageGenerationService.generatePropImage(db, log, id, { ...require('../services/localImageService').requestOptions(req.body), drama_id: req.body?.drama_id, model, style });
       response.success(res, { task_id: taskId });
     } catch (err) {
       if (err.message === '道具不存在') return response.notFound(res, err.message);
       if (err.message === '道具没有图片提示词') return response.badRequest(res, err.message);
       log.error('generatePropImage failed', { error: err.message });
+      if (err.statusCode === 400) return response.badRequest(res, err.message);
       response.internalError(res, err.message || '生成失败');
     }
   };

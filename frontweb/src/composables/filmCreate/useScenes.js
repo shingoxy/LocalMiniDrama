@@ -140,6 +140,7 @@ export function useScenes(deps) {
       polished_prompt_single: scene.polished_prompt_single || '',
       image_url: scene.image_url || '',
       local_path: scene.local_path || '',
+      image_candidate: scene.image_candidate || null,
       ref_image: scene.ref_image || '',
     }
     showEditScene.value = true
@@ -324,11 +325,12 @@ export function useScenes(deps) {
       })
       const taskId = res?.image_generation?.task_id ?? res?.task_id
       if (taskId) {
-        const pollRes = await pollTask(taskId, () => loadDrama(), meta)
+        const pollRes = await pollTask(taskId, undefined, meta)
         if (pollRes?.status === 'failed') {
           scene.errorMsg = pollRes.error || '生成失败'
-        } else {
-          ElMessage.success('场景图片已生成')
+        } else if (pollRes?.status === 'completed') {
+          await loadDrama()
+          ElMessage.success(pollRes.result?.result_usage === 'candidate' ? '场景候选已生成，请预览后选用' : '场景图片已生成')
         }
       } else {
         await loadDrama()

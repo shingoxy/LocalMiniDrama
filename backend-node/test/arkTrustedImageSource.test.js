@@ -90,7 +90,7 @@ test('Seedream original survives storyboard local saving and reaches Seedance 2.
   f.db.prepare("INSERT INTO dramas (id, title) VALUES (1, 'Mock')").run();
   f.db.prepare("INSERT INTO episodes (id, drama_id, episode_number) VALUES (1, 1, 1)").run();
   f.db.prepare("INSERT INTO storyboards (id, episode_id, storyboard_number, title) VALUES (1, 1, 1, 'Mock scene')").run();
-  const id = f.db.prepare("INSERT INTO image_generations (drama_id, storyboard_id, provider, prompt, status) VALUES (1, 1, 'openai', 'A synthetic person by a lighthouse', 'pending')").run().lastInsertRowid;
+  const id = f.db.prepare("INSERT INTO image_generations (drama_id, storyboard_id, provider, model, prompt, status) VALUES (1, 1, 'openai', ?, 'A synthetic person by a lighthouse', 'pending')").run(IMAGE).lastInsertRowid;
   t.mock.method(require('../src/services/uploadService'), 'downloadImageToLocal', async () => 'images/original.png');
   t.mock.method(require('../src/services/aiClient'), 'generateText', async () => 'A synthetic person by a lighthouse');
   delete require.cache[require.resolve('../src/services/imageService')];
@@ -116,8 +116,9 @@ test('Seedream original survives storyboard local saving and reaches Seedance 2.
 
 test('role/scene image generation also persists original metadata', async (t) => {
   const f = fixture(t);
+  f.db.prepare("INSERT INTO dramas (id, title) VALUES (1, 'Mock')").run();
   t.mock.method(require('../src/services/uploadService'), 'downloadImageToLocal', async () => 'images/original.png');
-  const item = f.imageClient.createAndGenerateImage(f.db, f.log, { drama_id: 1, prompt: 'A synthetic portrait' });
+  const item = f.imageClient.createAndGenerateImage(f.db, f.log, { drama_id: 1, prompt: 'A synthetic portrait', model: IMAGE });
   for (let i = 0; i < 50; i++) {
     await new Promise((r) => setTimeout(r, 5));
     const row = f.db.prepare('SELECT * FROM image_generations WHERE id = ?').get(item.id);

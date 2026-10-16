@@ -228,11 +228,12 @@
             <template v-if="drama?.characters?.length">
               <div v-for="item in drama.characters" :key="item.id" class="drama-res-item">
                 <div class="drama-res-cover" @click="openPreview(assetImageUrl(item))">
-                  <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
+                  <img v-if="assetImageUrl(item)" :src="assetImageUrl(item)" alt="" />
                   <span v-else class="library-placeholder">暂无图</span>
                 </div>
                 <div class="drama-res-info">
                   <div class="drama-res-name">{{ item.name || '未命名' }}</div>
+                  <el-tag v-if="item.image_candidate && !item.image_url && !item.local_path" size="small">候选，未选用</el-tag>
                   <div class="drama-res-meta" v-if="item.role">
                     <el-tag size="small" type="info">{{ item.role === 'main' ? '主角' : item.role === 'supporting' ? '配角' : item.role }}</el-tag>
                   </div>
@@ -253,11 +254,12 @@
             <template v-if="drama?.scenes?.length">
               <div v-for="item in drama.scenes" :key="item.id" class="drama-res-item">
                 <div class="drama-res-cover" @click="openPreview(assetImageUrl(item))">
-                  <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
+                  <img v-if="assetImageUrl(item)" :src="assetImageUrl(item)" alt="" />
                   <span v-else class="library-placeholder">暂无图</span>
                 </div>
                 <div class="drama-res-info">
                   <div class="drama-res-name">{{ item.location || '未命名' }}</div>
+                  <el-tag v-if="item.image_candidate && !item.image_url && !item.local_path" size="small">候选，未选用</el-tag>
                   <div class="drama-res-meta" v-if="item.time">
                     <el-tag size="small" type="info">{{ item.time }}</el-tag>
                   </div>
@@ -278,11 +280,12 @@
             <template v-if="drama?.props?.length">
               <div v-for="item in drama.props" :key="item.id" class="drama-res-item">
                 <div class="drama-res-cover" @click="openPreview(assetImageUrl(item))">
-                  <img v-if="item.image_url || item.local_path" :src="assetImageUrl(item)" alt="" />
+                  <img v-if="assetImageUrl(item)" :src="assetImageUrl(item)" alt="" />
                   <span v-else class="library-placeholder">暂无图</span>
                 </div>
                 <div class="drama-res-info">
                   <div class="drama-res-name">{{ item.name || '未命名' }}</div>
+                  <el-tag v-if="item.image_candidate && !item.image_url && !item.local_path" size="small">候选，未选用</el-tag>
                   <div class="drama-res-meta" v-if="item.type">
                     <el-tag size="small" type="info">{{ item.type }}</el-tag>
                   </div>
@@ -305,12 +308,16 @@
         <el-form-item label="图片">
           <div class="lib-img-editor">
             <div class="lib-img-thumb" @click="openPreview(assetImageUrl(editDramaCharForm))">
-              <img v-if="editDramaCharForm.image_url || editDramaCharForm.local_path" :src="assetImageUrl(editDramaCharForm)" />
+              <img v-if="assetImageUrl(editDramaCharForm)" :src="assetImageUrl(editDramaCharForm)" />
               <div v-else class="lib-img-empty"><el-icon><PictureFilled /></el-icon></div>
             </div>
             <div class="lib-img-btns">
               <el-button size="small" :loading="editDramaCharForm.imgUploading" @click="dramaCharFileRef.click()">上传图片</el-button>
               <el-button size="small" type="primary" :loading="editDramaCharForm.imgGenerating" @click="generateDramaCharImg">AI 生成</el-button>
+              <template v-if="editDramaCharForm.image_candidate">
+                <el-button size="small" @click="openPreview(assetImageUrl(editDramaCharForm.image_candidate))">预览候选</el-button>
+                <el-button size="small" @click="selectDramaCandidate(editDramaCharForm)">选用候选</el-button>
+              </template>
             </div>
           </div>
           <input ref="dramaCharFileRef" type="file" accept="image/*" style="display:none" @change="uploadDramaCharImg" />
@@ -339,12 +346,16 @@
         <el-form-item label="图片">
           <div class="lib-img-editor">
             <div class="lib-img-thumb" @click="openPreview(assetImageUrl(editDramaSceneForm))">
-              <img v-if="editDramaSceneForm.image_url || editDramaSceneForm.local_path" :src="assetImageUrl(editDramaSceneForm)" />
+              <img v-if="assetImageUrl(editDramaSceneForm)" :src="assetImageUrl(editDramaSceneForm)" />
               <div v-else class="lib-img-empty"><el-icon><PictureFilled /></el-icon></div>
             </div>
             <div class="lib-img-btns">
               <el-button size="small" :loading="editDramaSceneForm.imgUploading" @click="dramaSceneFileRef.click()">上传图片</el-button>
               <el-button size="small" type="primary" :loading="editDramaSceneForm.imgGenerating" @click="generateDramaSceneImg">AI 生成</el-button>
+              <template v-if="editDramaSceneForm.image_candidate">
+                <el-button size="small" @click="openPreview(assetImageUrl(editDramaSceneForm.image_candidate))">预览候选</el-button>
+                <el-button size="small" @click="selectDramaCandidate(editDramaSceneForm)">选用候选</el-button>
+              </template>
             </div>
           </div>
           <input ref="dramaSceneFileRef" type="file" accept="image/*" style="display:none" @change="uploadDramaSceneImg" />
@@ -366,12 +377,16 @@
         <el-form-item label="图片">
           <div class="lib-img-editor">
             <div class="lib-img-thumb" @click="openPreview(assetImageUrl(editDramaPropForm))">
-              <img v-if="editDramaPropForm.image_url || editDramaPropForm.local_path" :src="assetImageUrl(editDramaPropForm)" />
+              <img v-if="assetImageUrl(editDramaPropForm)" :src="assetImageUrl(editDramaPropForm)" />
               <div v-else class="lib-img-empty"><el-icon><PictureFilled /></el-icon></div>
             </div>
             <div class="lib-img-btns">
               <el-button size="small" :loading="editDramaPropForm.imgUploading" @click="dramaPropFileRef.click()">上传图片</el-button>
               <el-button size="small" type="primary" :loading="editDramaPropForm.imgGenerating" @click="generateDramaPropImg">AI 生成</el-button>
+              <template v-if="editDramaPropForm.image_candidate">
+                <el-button size="small" @click="openPreview(assetImageUrl(editDramaPropForm.image_candidate))">预览候选</el-button>
+                <el-button size="small" @click="selectDramaCandidate(editDramaPropForm)">选用候选</el-button>
+              </template>
             </div>
           </div>
           <input ref="dramaPropFileRef" type="file" accept="image/*" style="display:none" @change="uploadDramaPropImg" />
@@ -637,7 +652,7 @@ function openEditDramaChar(item) {
     description: item.description ?? '', personality: item.personality ?? '',
     appearance: item.appearance ?? '',
     image_url: item.image_url ?? '', local_path: item.local_path ?? null,
-    imgUploading: false, imgGenerating: false
+    image_candidate: item.image_candidate || null, imgUploading: false, imgGenerating: false
   }
   editDramaCharVisible.value = true
 }
@@ -684,7 +699,7 @@ async function generateDramaCharImg() {
   try {
     const res = await characterAPI.generateImage(form.id, null, null)
     const data = res?.data ?? res
-    const taskId = data?.task_id
+    const taskId = data?.image_generation?.task_id ?? data?.task_id
     if (!taskId) throw new Error('未返回任务ID')
     let task = null
     for (let i = 0; i < 300; i++) {
@@ -695,8 +710,7 @@ async function generateDramaCharImg() {
       if (task.status === 'failed') throw new Error(task.error || '生成失败')
     }
     if (!task || task.status !== 'completed') throw new Error('生成超时')
-    form.image_url = task.result?.image_url || ''
-    form.local_path = task.result?.local_path ?? null
+    applyGeneratedPreview(form, task.result)
     loadDrama()
     ElMessage.success('AI 图片已生成')
   } catch (e) { ElMessage.error(e.message || '生成失败') }
@@ -708,7 +722,7 @@ function openEditDramaScene(item) {
     id: item.id, location: item.location ?? '', time: item.time ?? '',
     description: item.description ?? '', prompt: item.prompt ?? '',
     image_url: item.image_url ?? '', local_path: item.local_path ?? null,
-    imgUploading: false, imgGenerating: false
+    image_candidate: item.image_candidate || null, imgUploading: false, imgGenerating: false
   }
   editDramaSceneVisible.value = true
 }
@@ -756,7 +770,7 @@ async function generateDramaSceneImg() {
   try {
     const res = await sceneAPI.generateImage({ scene_id: form.id, drama_id: dramaId, prompt })
     const data = res?.data ?? res
-    const taskId = data?.task_id
+    const taskId = data?.image_generation?.task_id ?? data?.task_id
     if (!taskId) throw new Error('未返回任务ID')
     let task = null
     for (let i = 0; i < 300; i++) {
@@ -767,8 +781,7 @@ async function generateDramaSceneImg() {
       if (task.status === 'failed') throw new Error(task.error || '生成失败')
     }
     if (!task || task.status !== 'completed') throw new Error('生成超时')
-    form.image_url = task.result?.image_url || ''
-    form.local_path = task.result?.local_path ?? null
+    applyGeneratedPreview(form, task.result)
     loadDrama()
     ElMessage.success('AI 图片已生成')
   } catch (e) { ElMessage.error(e.message || '生成失败') }
@@ -780,7 +793,7 @@ function openEditDramaProp(item) {
     id: item.id, name: item.name ?? '', type: item.type ?? '',
     description: item.description ?? '', prompt: item.prompt ?? '',
     image_url: item.image_url ?? '', local_path: item.local_path ?? null,
-    imgUploading: false, imgGenerating: false
+    image_candidate: item.image_candidate || null, imgUploading: false, imgGenerating: false
   }
   editDramaPropVisible.value = true
 }
@@ -826,7 +839,7 @@ async function generateDramaPropImg() {
   try {
     const res = await propAPI.generateImage(form.id, null, null)
     const data = res?.data ?? res
-    const taskId = data?.task_id
+    const taskId = data?.image_generation?.task_id ?? data?.task_id
     if (!taskId) throw new Error('未返回任务ID')
     let task = null
     for (let i = 0; i < 300; i++) {
@@ -837,8 +850,7 @@ async function generateDramaPropImg() {
       if (task.status === 'failed') throw new Error(task.error || '生成失败')
     }
     if (!task || task.status !== 'completed') throw new Error('生成超时')
-    form.image_url = task.result?.image_url || ''
-    form.local_path = task.result?.local_path ?? null
+    applyGeneratedPreview(form, task.result)
     loadDrama()
     ElMessage.success('AI 图片已生成')
   } catch (e) { ElMessage.error(e.message || '生成失败') }
@@ -860,7 +872,22 @@ function assetImageUrl(item) {
   if (!item) return ''
   const lp = item.local_path && String(item.local_path).trim()
   if (lp) return '/static/' + lp.replace(/^\//, '')
-  return item.image_url || ''
+  return item.image_url || assetImageUrl(item.image_candidate)
+}
+
+function applyGeneratedPreview(form, result) {
+  if (result?.result_usage === 'candidate') form.image_candidate = { id: result.image_generation_id, image_url: result.image_url, local_path: result.local_path }
+  else { form.image_url = result?.image_url || ''; form.local_path = result?.local_path ?? null }
+}
+async function selectDramaCandidate(form) {
+  try {
+    const image = form.image_candidate
+    if (!image?.id) return
+    await imagesAPI.select(image.id)
+    form.image_url = image.image_url; form.local_path = image.local_path; form.image_candidate = null
+    await loadDrama()
+    ElMessage.success('已选用，原图保留在历史')
+  } catch (e) { ElMessage.error(e.message || '选用失败') }
 }
 
 function formatDate(val) {

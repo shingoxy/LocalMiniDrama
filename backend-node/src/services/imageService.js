@@ -5,7 +5,7 @@ function list(db, query) {
     sql += ' AND drama_id = ?';
     params.push(query.drama_id);
   }
-  for (const key of ['engine', 'character_id', 'scene_id']) if (query[key] != null && query[key] !== '') { sql += ' AND ' + key + ' = ?'; params.push(query[key]); }
+  for (const key of ['engine', 'model_key', 'character_id', 'scene_id', 'prop_id']) if (query[key] != null && query[key] !== '') { sql += ' AND ' + key + ' = ?'; params.push(query[key]); }
   if (query.storyboard_id) {
     sql += ' AND storyboard_id = ?';
     params.push(query.storyboard_id);
@@ -34,6 +34,7 @@ function rowToItem(r) {
     drama_id: r.drama_id,
     scene_id: r.scene_id ?? undefined,
     character_id: r.character_id,
+    prop_id: r.prop_id,
     provider: r.provider,
     prompt: r.prompt,
     negative_prompt: r.negative_prompt,
@@ -566,13 +567,14 @@ function create(db, log, req) {
   }
   const useFirstFrameLayoutLock = resolveUseFirstFrameLayoutLock(req, frameType);
   const info = db.prepare(
-    `INSERT INTO image_generations (storyboard_id, drama_id, scene_id, character_id, provider, prompt, negative_prompt, model, frame_type, reference_images, use_first_frame_layout_lock, size, status, task_id, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
+    `INSERT INTO image_generations (storyboard_id, drama_id, scene_id, character_id, prop_id, provider, prompt, negative_prompt, model, frame_type, reference_images, use_first_frame_layout_lock, size, status, task_id, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`
   ).run(
     req.storyboard_id ?? null,
     Number(req.drama_id) || 0,
     sceneId,
     req.character_id != null ? Number(req.character_id) : null,
+    req.prop_id != null ? Number(req.prop_id) : null,
     req.provider || 'openai',
     mergedPrompt,
     req.negative_prompt ?? null,

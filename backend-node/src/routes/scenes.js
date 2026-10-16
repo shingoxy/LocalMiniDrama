@@ -105,6 +105,7 @@ function routes(db, log, cfg) {
         });
       } catch (err) {
         log.error('scenes generateImage', { error: err.message });
+        if (err.statusCode === 400) return response.badRequest(res, err.message);
         response.internalError(res, err.message);
       }
     },
@@ -149,6 +150,7 @@ function routes(db, log, cfg) {
         response.success(res, { message: '场景四视图生成任务已提交', image_generation: out.image_generation });
       } catch (err) {
         log.error('scenes generate-four-view-image', { error: err.message });
+        if (err.statusCode === 400) return response.badRequest(res, err.message);
         response.internalError(res, err.message);
       }
     },

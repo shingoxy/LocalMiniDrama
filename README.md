@@ -16,13 +16,13 @@
 
 | 制作环节 | 功能 |
 | --- | --- |
-| 剧本与项目 | 项目、剧集管理，剧本生成与编辑，角色、场景、道具提取 |
+| 剧本与项目 | 项目、剧集管理，剧本生成与编辑，角色、场景、道具提取；新项目默认中文分镜，成片语言随提示词 |
 | 视觉资产 | 角色图、场景图、道具图、分镜图、参考帧、素材库 |
 | Storyboard | 列表与画布，经典分镜与全能分镜，提示词编辑、批量生成 |
 | AI Provider | 沿用现有文本、图片、视频接口；包括 DeepSeek、Seedream、Seedance、Kling 等配置与协议 |
 | 混合视频 | 每个 Shot 单独选模型，项目默认、整集与多选批量设置，按 Shot 路由生成 |
-| 本地 H3 | 直接连接现有 ComfyUI，提交 Workflow，Queue / Progress / History / Cancel，取回 MP4 |
-| 本地图片 | 可选 Qwen-Image 2.1 / Flux.1-dev，人物、场景、首尾帧候选，历史、预览选用与任务恢复；[使用说明](docs/local-images.md) |
+| 本地 H3 | 直接连接现有 ComfyUI，首帧 / 首尾帧输入，Queue / Progress / History / Cancel，长任务跟踪与 MP4 自动预览 |
+| 本地图片 | 可选 Qwen-Image 2.1，人物、场景、道具、首尾帧候选，历史、自动预览、选用与任务恢复；[使用说明](docs/local-images.md) |
 | Prompt Adapter | Universal Shot Intent，DeepSeek 转换 H3 Prompt，缓存与手工编辑保护 |
 | 成本管理 | 模型价格、月费分摊、重试预算、本机耗时、电费、单集与整季预测 |
 | 最终合成 | 复用已有 FFmpeg Pipeline、字幕、音频、水印与视频合成 |
@@ -56,6 +56,7 @@ Node Backend 直接使用 ComfyUI API，无额外 Worker。模型选择、Prompt
 | --- | --- |
 | Web | Vue 3、Vite、Element Plus、Pinia、Vue Flow |
 | Backend | Node.js、Express、better-sqlite3、SQLite |
+| Local Image | 现有 ComfyUI API、Qwen-Image 2.1 文生图 / 参考图编辑 Workflow |
 | Local Video | 现有 ComfyUI API、MiniMax H3 Workflow |
 | Media | FFmpeg / ffprobe、现有本地存储与 `/static` |
 | Desktop | 原有 Electron 项目；桌面安装包仍需单独构建与验证 |
@@ -101,18 +102,31 @@ Backend 启动时自动应用 migration。更新前备份 SQLite、素材与私�
 - Local MiniMax H3 固定作为本地选项，不要求创建云视频 API Key。
 - 具体云协议仍由现有 Provider 实现处理，配置说明见 [AI 配置指南](docs/configuration.md)。该指南中的账户信息以 Provider 当前说明为准。
 
+## Qwen-Image 2.1 本地生图
+
+人物、场景、道具、首帧、尾帧和通用生图均默认使用本地 **Qwen-Image 2.1**。选择优先级为 **本次请求 > 项目对应用途默认 > 本地 Qwen**；云端图片模型需要手动选择，也可保存为项目默认。Flux 选项及模板已移除，原有图片历史保留；旧 Flux 配置会提示重新选择模型。
+
+1. 在页面顶部打开 **图片模型与本地素材**，设置与 H3 共用的 ComfyUI 地址，点击 **检查连接与工作流**。
+2. 按用途选择模型，可填写本地尺寸、Seed、参考图片；人物 LoRA 默认关闭。点击 **保存项目默认** 后，后续请求使用该用途的设置。
+3. 使用原有角色、场景、道具或分镜生图按钮提交；列表、画布和一键流程共用本地任务入口。
+4. 完成后查看候选预览，点击 **选用** 才更新主图或首尾帧绑定。已有主图继续保留，候选不会自动成为后续生成的参考素材。
+
+Qwen 自动模式在有参考图时使用编辑工作流，否则使用文生图。参考图最多六张，默认尺寸为 1024×1024，宽高需为 32 的倍数；尾帧编辑继承首帧实际尺寸。一键连续生成首尾帧时，可以使用刚完成的首帧候选生成尾帧，无须先覆盖已选主图。文生图、编辑模板和完整操作说明见 [本地图片说明](docs/local-images.md)。
+
+新项目的一键全流程默认分镜语言为 **中文**，成片语言为 **随提示词**；已有项目的显式语言设置继续生效。本地生图不要求云端图片 Key，提示词优化仍可能使用已配置的云端文本服务。
+
 ## ComfyUI + MiniMax H3
 
 使用已经可以运行的 ComfyUI Desktop 和 H3 Workflow。Storyboard 页顶部打开 **ComfyUI / Cost Settings** 设置地址，默认 `http://127.0.0.1:8188`；Desktop 使用其他端口时填写实际地址，例如 `http://127.0.0.1:8000`。**Test Connection** 检查服务与模板所需节点，不生成视频。
 
-当前模板模式为 **I2VA**：Storyboard 首帧图像 + Prompt → 带原生音频的 H3 视频。默认 5 秒输入、24 FPS。帧数沿用源 Workflow 的公式，5 秒请求产生 124 帧，实际时长约 5.17 秒，以 ffprobe 结果为准。
+只有首帧时使用 **I2VA**；同时提供首尾帧时使用 **FL2VA**，两种模式均由图像与 Prompt 生成带原生音频的 H3 视频。默认 5 秒输入、24 FPS。帧数沿用源 Workflow 的公式，5 秒请求产生 124 帧，实际时长约 5.17 秒，以 ffprobe 结果为准。
 
 模板与映射位于：
 
 - [minimax_h3.json](backend-node/configs/workflows/minimax_h3.json)：从现有保存图展开得到的 22 个执行节点。
 - [minimax_h3.mapping.json](backend-node/configs/workflows/minimax_h3.mapping.json)：Prompt、图像、Duration、Frames、FPS、宽高、Seed、Output 与模型节点统一映射。
 
-模板保留原模型、LoRA、Sampler、Scheduler 和缩放链。首帧默认沿用源图的 1MP / 32 倍数缩放，H3 宽高跟随缩放后的图像。尾帧与外部音频未连接，不能直接当作 FL2VA / Ref2VA 模板使用。详细说明见 [COMFYUI.md](docs/COMFYUI.md)。
+模板保留原模型、LoRA、Sampler、Scheduler 和缩放链。首帧默认沿用源图的 1MP / 32 倍数缩放，H3 宽高跟随缩放后的图像；FL2VA 尾帧缩放到首帧的目标尺寸。外部音频未连接，不能直接当作 Ref2VA 模板使用。双帧接线与验证范围见 [本地图片及首尾帧说明](docs/local-images.md)，原工作流结构见 [COMFYUI.md](docs/COMFYUI.md)。
 
 ## Provider-specific Prompt Adapter
 
@@ -124,7 +138,7 @@ Backend 启动时自动应用 migration。更新前备份 SQLite、素材与私�
 
 每个 Shot 打开 **Original / Shot Intent · H3 Prompt**，可以查看和编辑 Intent JSON、查看 H3 Optimized Prompt，并点击 **Optimize for MiniMax H3 / 重新优化**。
 
-H3 规则来自 [MiniMax H3 官方 Prompt Writing Skill](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing)：英文描述、保留原语言对白、明确图像对齐、视觉与声音分区，短镜头聚焦一个核心动作。当前 I2VA 使用官方首帧声明与三字段结构。
+H3 规则来自 [MiniMax H3 官方 Prompt Writing Skill](https://github.com/MiniMax-AI/MiniMax-H3/tree/main/skills/h3-prompt-writing)：英文描述、保留原语言对白、明确图像对齐、视觉与声音分区，短镜头聚焦一个核心动作。按 I2VA / FL2VA 使用对应的首帧 / 双帧声明与三字段结构，模式变化时重新检查缓存。
 
 Storyboard 与 Mode 未改变时复用缓存；手工 Prompt 标记 `user_edited` 后自动生成不会覆盖。明确点击重新优化并确认，才替换手工版本。优化会调用已配置的 DeepSeek 文本 API，费用由该账户承担；H3 的 API ¥0 指本地视频生成，未包含文本优化费用。见 [VIDEO_PROMPT_ADAPTER.md](docs/VIDEO_PROMPT_ADAPTER.md)。
 
@@ -146,6 +160,17 @@ Storyboard 与 Mode 未改变时复用缓存；手工 Prompt 标记 `user_edited
 **Local Draft / 本地预演** 临时使用 H3，不改变已保存的模型选择。生成后可以 Keep Local、Local Regenerate、Upgrade to Cloud Model 或 Keep Static。Upgrade 只修改模型，下一次生成云视频时仍需明确确认费用。Keep Static 使用当前分镜图生成静态 MP4，继续参与 FFmpeg 合成。
 
 H3 视频可以直接作为最终镜头。Local 失败只报错，不会自动转向收费模型，也不会自动增加重试次数。见 [HYBRID_VIDEO.md](docs/HYBRID_VIDEO.md)。
+
+### 本地视频长任务与预览
+
+本地视频生成可能需要数十分钟，排队还会增加等待时间。视频任务以前端收到的后台状态为准，不再因网页等待超过 15 分钟、长时间进度不变或超过 30 分钟而自动判为失败。后台 **Local Timeout (min)** 配置仍然生效。
+
+- 前 1 分钟每 2 秒查询一次，此后每 10 秒查询一次，降低长时间等待时的请求量。
+- 列表和画布可接续已有视频任务；同一任务共享查询，完成后自动拉取媒体并更新当前预览。
+- 一键流程保留暂停与取消，长视频等待使用相同的查询频率。
+- 已完成视频可通过 **尾帧衔接** 提取实际最后一帧，作为下一分镜的首帧。
+
+这些调整改善任务跟踪和预览同步，不改变 ComfyUI 的采样速度。生成期间可以继续处理其他素材；重新生成会创建新任务，应在确认需要新结果后使用。
 
 ## Cost Management
 
@@ -190,16 +215,19 @@ SQLite、图片、视频和项目数据存储在配置指定的本机目录。Lo
 | ComfyUI Offline | 检查 Desktop 是否运行，以及 Settings 的实际端口；已有云模型不受本地离线影响 |
 | 模型未配置或已停用 | 在 AI 配置启用原模型，或手动重新选择，不会自动换成其他模型 |
 | H3 缺少首帧 | 先生成或导入本地分镜图；远程图需要先进入 Media Library |
-| 尾帧 / 外部音频报错 | 当前模板只接首帧，使用 I2VA 输入；其他 Mode 需对应 Workflow |
+| 尾帧 / 外部音频报错 | 首尾帧输入使用 FL2VA，检查两张图片及目标尺寸；外部音频仍未接线 |
 | H3 Prompt 优化失败 | 检查启用的 DeepSeek 配置和官方字段格式；缓存或手工 Prompt 可以继续使用 |
 | H3 排队或超时 | History 查看进度；已有任务可继续查询；Retry Local 会创建新任务 |
+| 本地图片已生成但主图未切换 | 在候选区预览并点击「选用」，生成候选不会自动覆盖已有主图 |
+| 本地视频完成后预览未更新 | 更新并构建前端，刷新一次加载新版；长任务完成后应自动更新，同时检查后台任务状态和 MP4 地址 |
 | 费用未知 | 补全实际账户价格、套餐额度或本机成功历史；确认未知费用不会使 API 免费 |
 | 合成 / Keep Static 失败 | 检查现有 FFmpeg 与 ffprobe 路径，参考图与 MP4 是否可访问 |
 
 ## Current Limitations
 
-- 集成后的真实 H3 生成与 MP4 端到端验证仍待完成，不能将 Mock 测试视为实机成功或稳定性证明。
-- 当前 Workflow 只支持 I2VA、24 FPS、4–15 秒输入，默认 5 秒；尾帧与外部音频未连接。输出帧数采用源 Workflow 的网格公式。
+- 已有本机 H3 单首帧 5 秒样例生成、MP4 解码及列表 / 画布播放记录；FL2VA 双帧视频效果仍待实机验证，不能把接线测试视为画质或一致性证明。
+- 当前 Workflow 支持 I2VA / FL2VA、24 FPS、4–15 秒输入，默认 5 秒；外部音频未连接。输出帧数采用源 Workflow 的网格公式。
+- 本地视频长任务修复使用虚拟时间和隔离浏览器验证，复用已有视频素材，未重新执行 GPU 生成；这些检查不代表生成速度或人物一致性已经改善。
 - 云视频均使用 Mock 验证，真实 Provider 的账户权限、配额与账单需自行确认。
 - H3 语法校验只检查结构与 Mode 对齐，不证明模型执行效果、对白长度或视觉质量。
 - 单集 / 整季预算按当前集比例推算，计费没有自动汇率、自动账单同步；文本优化、图片和 TTS 费用不纳入视频报价。`per_image` 当前按每 Shot 一个计费图像单位估算，多图计费需按实际账户调整预算。
@@ -222,7 +250,7 @@ node --test test/*.test.js
 npm run build
 ```
 
-测试覆盖增量迁移、模型选择、混合分发、Mock ComfyUI 协议、云调用确认、Prompt 缓存与成本公式，不调用真实收费云视频 API。实机 H3 验证独立执行。
+测试覆盖增量迁移、模型选择、混合分发、Mock ComfyUI 协议、云调用确认、Prompt 缓存与成本公式，以及 Qwen 候选选用、项目素材关联、长任务恢复和一键流程暂停 / 取消，不调用真实收费云视频 API。长任务通过虚拟时钟覆盖 22 分钟生成和更长排队；实机 H3 验证独立执行。
 
 ## Acknowledgements & License
 

@@ -7,7 +7,7 @@ function isEnglishMedia(db, dramaId) {
   if (!db || !dramaId) return false;
   const row = db.prepare('SELECT style, metadata FROM dramas WHERE id = ? AND deleted_at IS NULL').get(Number(dramaId));
   const meta = parseMetadata(row?.metadata);
-  return meta.media_language === 'en' || (!meta.media_language && row?.style === 'western short drama');
+  return meta.media_language === 'en';
 }
 
 // Seedance reference anchors are API syntax, not visible Chinese text.

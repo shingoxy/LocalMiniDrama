@@ -7,9 +7,10 @@ const { pipeline } = require('stream/promises');
 const { Transform } = require('stream');
 const sharp = require('sharp');
 const comfy = require('./comfyClient');
-const KEYS = ['qwen_image_21_t2i', 'qwen_image_21_edit', 'flux1_dev_t2i'];
+const ImageRequestError = require('./imageRequestError');
+const KEYS = ['qwen_image_21_t2i', 'qwen_image_21_edit'];
 function loadTemplate(key) {
-  if (!KEYS.includes(key)) throw new Error('本地图片工作流无效');
+  if (!KEYS.includes(key)) throw new ImageRequestError('本地图片工作流无效');
   const dir = path.resolve(__dirname, '../../configs/workflows');
   const workflow = JSON.parse(fs.readFileSync(path.join(dir, key + '.json'), 'utf8'));
   const mapping = JSON.parse(fs.readFileSync(path.join(dir, key + '.mapping.json'), 'utf8'));
@@ -18,9 +19,9 @@ function loadTemplate(key) {
 }
 function dimensions(size, multiple) {
   const match = /^(\d+)x(\d+)$/.exec(size || '1024x1024');
-  if (!match) throw new Error('本地图片尺寸须为 WIDTHxHEIGHT');
+  if (!match) throw new ImageRequestError('本地图片尺寸须为 WIDTHxHEIGHT');
   const [width, height] = match.slice(1).map(Number);
-  if ([width, height].some(v => v < 256 || v > 4096 || v % multiple)) throw new Error(`本地图片宽高须在 256–4096，且为 ${multiple} 的倍数；不会自动降分辨率`);
+  if ([width, height].some(v => v < 256 || v > 4096 || v % multiple)) throw new ImageRequestError(`本地图片宽高须在 256–4096，且为 ${multiple} 的倍数；不会自动降分辨率`);
   return { width, height };
 }
 function bindWorkflow(input) {

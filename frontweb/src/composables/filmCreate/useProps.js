@@ -140,6 +140,7 @@ export function useProps(deps) {
       prompt: prop.prompt || '',
       image_url: prop.image_url || '',
       local_path: prop.local_path || '',
+      image_candidate: prop.image_candidate || null,
       ref_image: prop.ref_image || '',
     }
     showEditProp.value = true
@@ -304,11 +305,12 @@ export function useProps(deps) {
       const res = await propAPI.generateImage(prop.id, undefined, getSelectedStyle(), !!useQuadGrid)
       const taskId = res?.task_id
       if (taskId) {
-        const pollRes = await pollTask(taskId, () => loadDrama(), meta)
+        const pollRes = await pollTask(taskId, undefined, meta)
         if (pollRes?.status === 'failed') {
           prop.errorMsg = pollRes.error || '生成失败'
-        } else {
-          ElMessage.success('道具图片已生成')
+        } else if (pollRes?.status === 'completed') {
+          await loadDrama()
+          ElMessage.success(pollRes.result?.result_usage === 'candidate' ? '道具候选已生成，请预览后选用' : '道具图片已生成')
         }
       } else {
         await loadDrama()

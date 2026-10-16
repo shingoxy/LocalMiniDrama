@@ -8,6 +8,7 @@ const comfy = require('./comfyClient');
 const tasks = require('./taskService');
 const settings = require('./settingsService');
 const layout = require('./storageLayout');
+const ImageRequestError = require('./imageRequestError');
 const active = new Set();
 const json = value => layout.parseMetadata(value);
 const FIELDS = ['engine', 'model_key', 'workflow_key', 'workflow_version', 'seed', 'provider_task_id', 'generation_elapsed_seconds', 'generation_metadata', 'width', 'height'];
@@ -33,27 +34,26 @@ function prepare(db, body) {
   if (!selection?.local) return { selection };
   const use = models.purpose(body);
   const requestedMode = body.generation_mode || 'auto';
-  if (!['auto', 't2i', 'edit'].includes(requestedMode)) throw new Error('本地图片生成模式无效');
+  if (!['auto', 't2i', 'edit'].includes(requestedMode)) throw new ImageRequestError('本地图片生成模式无效');
   const explicitRefs = body.reference_images || body.reference_image_urls || [];
-  if (!Array.isArray(explicitRefs)) throw new Error('参考图必须为数组');
-  if (explicitRefs.length > selection.references) throw new Error('参考图超限，或 Flux 不支持参考图编辑');
-  if (requestedMode === 't2i' && explicitRefs.length) throw new Error('文生图模式不能丢弃已提供的参考图，请选择编辑模式');
-  if (requestedMode === 'edit' && !selection.modes.includes('edit')) throw new Error('Flux 当前工作流不支持参考图编辑，请选择 Qwen');
-  // Flux auto is explicitly text-only. A requested edit or explicit reference is never discarded.
+  if (!Array.isArray(explicitRefs)) throw new ImageRequestError('参考图必须为数组');
+  if (explicitRefs.length > selection.references) throw new ImageRequestError('参考图超限，最多支持 6 张');
+  if (requestedMode === 't2i' && explicitRefs.length) throw new ImageRequestError('文生图模式不能丢弃已提供的参考图，请选择编辑模式');
   const mode = requestedMode === 'auto' ? selection.references && (explicitRefs.length || body.storyboard_id || use === 'last') ? 'edit' : 't2i' : requestedMode;
-  const key = body.workflow_key || (selection.model === 'flux1-dev' ? 'flux1_dev_t2i' : 'qwen_image_21_' + mode);
+  const key = body.workflow_key || 'qwen_image_21_' + mode;
   const { mapping } = provider.loadTemplate(key);
-  if (mapping.model_key !== selection.key || mapping.mode !== mode) throw new Error('工作流与所选模型/模式不一致');
+  if (mapping.model_key !== selection.key || mapping.mode !== mode) throw new ImageRequestError('工作流与所选模型/模式不一致');
   const seed = body.seed == null ? Math.floor(Math.random() * Number.MAX_SAFE_INTEGER) : Number(body.seed);
-  if (!Number.isSafeInteger(seed) || seed < 0) throw new Error('Seed 必须为非负安全整数');
+  if (!Number.isSafeInteger(seed) || seed < 0) throw new ImageRequestError('Seed 必须为非负安全整数');
   // Legacy asset sizes were cloud presets. Only an explicit local_size/size in /images opts in to those pixels.
   const size = body.local_size || (body.local_size_explicit ? body.size : null) || config(db).default_size;
   provider.dimensions(size, mapping.size_multiple);
   if (body.lora?.name) {
     const charId = Number(body.lora.character_id || body.character_id);
-    if (!charId) throw new Error('请选择该 LoRA 对应的人物');
+    if (!charId) throw new ImageRequestError('请选择该 LoRA 对应的人物');
     models.projectId(db, { drama_id: models.projectId(db, body), character_id: charId });
-    if (body.character_id && Number(body.character_id) !== charId) throw new Error('LoRA 关联人物与生成目标不同');
+    if (body.character_id && Number(body.character_id) !== charId) throw new ImageRequestError('LoRA 关联人物与生成目标不同');
+    if (!Number.isFinite(body.lora.strength) || Math.abs(body.lora.strength) > 2) throw new ImageRequestError('LoRA 强度须在 -2–2');
   }
   return { selection, size, seed, key, mode, metadata: { purpose: use, result_usage: 'candidate', input: { generation_mode: requestedMode, reference_images: explicitRefs, lora: body.lora || null, size, size_explicit: !!body.local_size || !!(body.local_size_explicit && body.size) }, cancel_requested: false } };
 }
@@ -75,8 +75,21 @@ function references(db, row, input) {
   const push = (source, role) => { if (source && !result.some(r => r.source === source)) result.push({ source, role }); };
   const shot = row.storyboard_id ? db.prepare('SELECT * FROM storyboards WHERE id = ? AND deleted_at IS NULL').get(row.storyboard_id) : null;
   if (models.purpose(row) === 'last') {
-    const first = shot?.first_frame_image_id ? db.prepare('SELECT local_path,image_url FROM image_generations WHERE id = ? AND deleted_at IS NULL').get(shot.first_frame_image_id) : null;
-    const source = first?.local_path || first?.image_url || shot?.local_path || shot?.image_url;
+    // A frame-pair request may use the just-generated candidate without adopting it as the main image.
+    let first, requestedFirstSource;
+    for (const ref of input.reference_images || []) {
+      const id = typeof ref === 'number' ? ref : ref?.image_generation_id;
+      const candidate = id
+        ? db.prepare('SELECT * FROM image_generations WHERE id = ? AND deleted_at IS NULL AND status = ?').get(Number(id), 'completed')
+        : typeof ref === 'string' ? db.prepare('SELECT * FROM image_generations WHERE (local_path = ? OR image_url = ?) AND deleted_at IS NULL AND status = ? ORDER BY id DESC LIMIT 1').get(ref, ref, 'completed') : null;
+      if (candidate && Number(candidate.drama_id) === Number(row.drama_id) && Number(candidate.storyboard_id) === Number(row.storyboard_id) && /^(first|storyboard_first|first_frame)$/.test(candidate.frame_type || '')) {
+        first = candidate;
+        requestedFirstSource = typeof ref === 'string' ? ref : null;
+        break;
+      }
+    }
+    if (!first && shot?.first_frame_image_id) first = db.prepare('SELECT local_path,image_url FROM image_generations WHERE id = ? AND deleted_at IS NULL').get(shot.first_frame_image_id);
+    const source = requestedFirstSource || first?.local_path || first?.image_url || shot?.local_path || shot?.image_url;
     if (!source) throw new Error('Qwen 尾帧编辑需要先选定该分镜首帧');
     push(source, 'first frame: preserve identity, clothing, composition and spatial positions; edit only the end action');
   }
@@ -100,9 +113,15 @@ function references(db, row, input) {
   }
   const sceneId = shot?.scene_id || row.scene_id;
   if (sceneId) {
-    const scene = db.prepare('SELECT * FROM scenes WHERE id = ? AND deleted_at IS NULL').get(sceneId);
-    if (!scene || Number(scene.drama_id) !== Number(row.drama_id)) throw new Error('场景参考不属于该项目');
-    push(scene.ref_image || scene.local_path || scene.image_url, 'scene and environment reference: ' + scene.location);
+    const scene = db.prepare('SELECT * FROM scenes WHERE id = ?').get(sceneId);
+    if (scene && Number(scene.drama_id) !== Number(row.drama_id)) throw new Error('场景参考不属于该项目');
+    // Re-extraction can leave an old storyboard pointing to a removed optional scene.
+    if (scene && !scene.deleted_at) push(scene.ref_image || scene.local_path || scene.image_url, 'scene and environment reference: ' + scene.location);
+  }
+  if (row.prop_id) {
+    const prop = db.prepare('SELECT * FROM props WHERE id = ? AND deleted_at IS NULL').get(row.prop_id);
+    if (!prop || Number(prop.drama_id) !== Number(row.drama_id)) throw new Error('道具参考不属于该项目');
+    push(prop.ref_image || prop.local_path || prop.image_url, 'prop reference: ' + prop.name);
   }
   return result;
 }
@@ -173,7 +192,8 @@ async function run(db, log, id, resume = false) {
       const layoutInstruction = row.storyboard_id && !['quad_grid', 'nine_grid'].includes(row.frame_type)
         ? 'Generate one continuous image. Use references for identity/environment, do not reproduce reference sheets.'
         : 'Follow the requested layout, including explicitly requested reference sheets or storyboard grids. Use references for identity and environment.';
-      const prompt = [refs.map((r, i) => `Image ${i + 1}: ${r.role}.`).join('\n'), layoutInstruction, row.prompt].filter(Boolean).join('\n\n');
+      const editInstruction = row.generation_mode === 'edit' ? 'Apply only explicitly requested changes. Preserve identity, framing, spatial layout and all unmentioned objects, clothing layers and colors. Do not transfer a color change to other garments or objects.' : '';
+      const prompt = [refs.map((r, i) => `Image ${i + 1}: ${r.role}.`).join('\n'), layoutInstruction, editInstruction, row.prompt].filter(Boolean).join('\n\n');
       const bound = provider.bindWorkflow({ workflow_key: row.workflow_key, references: uploaded, prompt, negative_prompt: row.negative_prompt, size: row.size, seed: row.seed, lora: input.lora, purpose: meta.purpose });
       await provider.validate(base, bound.workflow);
       if (cancelled(db, id)) return;
@@ -192,7 +212,7 @@ async function run(db, log, id, resume = false) {
       },
     });
     const project = layout.getProjectStorageSubdir(db, row.drama_id);
-    const relative = [project || 'library', row.character_id ? 'characters' : row.scene_id ? 'scenes' : 'images', 'ig_' + id + '_' + randomUUID() + path.extname(result.output.filename).toLowerCase()].join('/');
+    const relative = [project || 'library', row.character_id ? 'characters' : row.scene_id ? 'scenes' : row.prop_id ? 'props' : 'images', 'ig_' + id + '_' + randomUUID() + path.extname(result.output.filename).toLowerCase()].join('/');
     const dims = await provider.download(base, result.output, path.join(root, relative), provider.dimensions(row.size, mapping.size_multiple));
     if (cancelled(db, id)) return;
     if (['quad_grid', 'nine_grid'].includes(row.frame_type)) {
@@ -266,8 +286,8 @@ function adopt(db, id, body = {}) {
       const type = body.frame_type || row.frame_type || 'first';
       if (!['first', 'storyboard_first', 'first_frame', 'last', 'storyboard_last', 'tail', 'last_frame'].includes(type)) throw new Error('该候选不是可选用的首尾帧');
       require('./storyboardFrameBinding').bindStoryboardFrameImage(db, row.storyboard_id, type, row.id, row.image_url, row.local_path);
-    } else if (row.character_id || row.scene_id) {
-      const table = row.character_id ? 'characters' : 'scenes', target = row.character_id || row.scene_id;
+    } else if (row.character_id || row.scene_id || row.prop_id) {
+      const table = row.character_id ? 'characters' : row.scene_id ? 'scenes' : 'props', target = row.character_id || row.scene_id || row.prop_id;
       const old = db.prepare(`SELECT * FROM ${table} WHERE id = ? AND deleted_at IS NULL`).get(target);
       let extras = []; try { extras = JSON.parse(old.extra_images || '[]'); } catch {}
       if (!Array.isArray(extras)) extras = [];
@@ -275,7 +295,7 @@ function adopt(db, id, body = {}) {
       if (previous && !extras.includes(previous)) extras.push(previous);
       if (row.character_id) require('../utils/seedance2AssetGuards').markStaleOnCharacterMainImageDrift(db, { warn() {}, info() {} }, old, row);
       db.prepare(`UPDATE ${table} SET image_url = ?, local_path = ?, extra_images = ?, updated_at = ? WHERE id = ?`).run(row.image_url, row.local_path, JSON.stringify(extras), now, target);
-    } else throw new Error('该图片没有关联人物、场景或分镜');
+    } else throw new Error('该图片没有关联人物、场景、道具或分镜');
     updateMetadata(db, row.id, { result_usage: 'selected', selected_at: now });
     return { selected: true, image_generation_id: row.id };
   })();

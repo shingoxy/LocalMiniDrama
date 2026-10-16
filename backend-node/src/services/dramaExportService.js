@@ -206,7 +206,8 @@ function exportDrama(db, cfg, log, dramaId) {
     extraFilesToPack.push({ localRelPath: ig.local_path, zipPath: zip_file });
     return { ...require('./localImageService').metadataFields(ig), provider: ig.provider, prompt: ig.prompt, negative_prompt: ig.negative_prompt, model: ig.model, frame_type: ig.frame_type, size: ig.size, quality: ig.quality, generation_mode: ig.generation_mode, created_at: ig.created_at, completed_at: ig.completed_at, zip_file,
       character_index: ig.character_id ? characters.findIndex(c => c.id === ig.character_id) : null,
-      scene_index: ig.scene_id ? dedupedScenes.findIndex(scene => scene.id === ig.scene_id) : null };
+      scene_index: ig.scene_id ? dedupedScenes.findIndex(scene => scene.id === ig.scene_id) : null,
+      prop_index: ig.prop_id ? props.findIndex(p => p.id === ig.prop_id) : null };
   });
   const zipData = {
     asset_image_generations: assetHistory,

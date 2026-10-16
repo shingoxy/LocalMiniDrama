@@ -5,6 +5,7 @@ const imageClient = require('./imageClient');
 const propService = require('./propService');
 const uploadService = require('./uploadService');
 const storageLayout = require('./storageLayout');
+const localImages = require('./localImageService');
 const { aspectRatioToSize } = require('./imageService');
 
 function appendPrompt(base, extra) {
@@ -68,6 +69,8 @@ async function processPropImageGeneration(db, log, taskId, propId, opts) {
   let result;
   try {
     result = await imageClient.callImageApi(db, log, {
+      ...localImages.requestOptions(opts),
+      prop_id: prop.id,
       prompt: fullPrompt,
       size: imageSize,
       drama_id: prop.drama_id,
@@ -153,6 +156,21 @@ function generatePropImage(db, log, propId, opts) {
   if (!prop) throw new Error('道具不存在');
   if (!prop.prompt || !String(prop.prompt).trim()) {
     throw new Error('道具没有图片提示词');
+  }
+  const target = { ...localImages.requestOptions(opts), drama_id: opts?.drama_id ?? prop.drama_id, prop_id: prop.id };
+  const prepared = localImages.prepare(db, target);
+  if (prepared.selection?.local) {
+    const { mergeCfgStyleWithDrama, styleFieldsFromDramaRow } = require('../utils/dramaStyleMerge');
+    const drama = db.prepare('SELECT style, metadata FROM dramas WHERE id = ? AND deleted_at IS NULL').get(prop.drama_id);
+    const cfg = mergeCfgStyleWithDrama(require('../config').loadConfig(), drama || {});
+    const override = String(opts?.style || '').trim();
+    let style = override || cfg?.style?.default_style_en || cfg?.style?.default_style || '';
+    const projectStyle = styleFieldsFromDramaRow(drama);
+    if (!override && !projectStyle.zh && !projectStyle.en && (!projectStyle.legacy || projectStyle.legacy === 'custom')) style = appendPrompt(style, cfg?.style?.default_prop_style);
+    return imageClient.createAndGenerateImage(db, log, {
+      ...target, prompt: appendPrompt(prop.prompt, style), image_model_key: prepared.selection.key,
+      user_negative_prompt: prop.negative_prompt,
+    }).task_id;
   }
 
   const task = taskService.createTask(db, log, 'prop_image_generation', String(propId));

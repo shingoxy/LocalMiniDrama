@@ -10,6 +10,7 @@ import {
   toAbsoluteMediaUrl,
 } from '@/utils/canvasWorkflow'
 import { dramaUsesFirstLastFrame, sbVideoFirstLastUrls } from '@/utils/storyboardMedia'
+import { useGenerationTaskStore, GEN_RESOURCE } from '@/stores/generationTaskStore'
 
 async function pollTaskSimple(taskId, options = {}) {
   if (!taskId) return { status: 'failed', error: '缺少 task_id' }
@@ -70,7 +71,14 @@ export async function runVideoStep(drama, sb, genOpts) {
     duration: sb.duration || undefined,
   }, genOpts.videoQuote)
   if (res?.task_id) {
-    const polled = await pollTaskSimple(res.task_id)
+    const episode = findStoryboardInDrama(drama, sb.id)?.episode
+    const polled = await useGenerationTaskStore().pollTask(res.task_id, {
+      dramaId: drama.id,
+      episodeId: sb.episode_id ?? episode?.id,
+      resourceType: GEN_RESOURCE.SB_VIDEO,
+      resourceId: sb.id,
+      label: `分镜视频 #${sb.storyboard_number ?? sb.id}`,
+    })
     if (polled.status !== 'completed') throw new Error(polled.error || '视频生成失败')
   }
 }

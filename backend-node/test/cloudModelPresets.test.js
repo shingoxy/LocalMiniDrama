@@ -221,7 +221,8 @@ test('Western preset creates four empty-key templates, preserves Google/Kling an
   const created = dramaService.createDrama(db, quiet, { title: 'New' });
   assert.equal(created.style, preset.STYLE);
   assert.equal(created.metadata.aspect_ratio, '9:16');
-  assert.equal(created.metadata.script_language, 'en');
+  assert.equal(created.metadata.script_language, 'zh');
+  assert.equal(created.metadata.media_language, 'auto');
   assert.equal(dramaService.getDramaById(db, before.id).style, 'realistic');
   assert.equal(dramaService.createDrama(db, quiet, { title: 'Explicit', style: 'anime style', metadata: { aspect_ratio: '16:9' } }).metadata.aspect_ratio, '16:9');
 });

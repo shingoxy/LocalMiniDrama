@@ -22,6 +22,7 @@ function routes(db, cfg, log) {
         response.created(res, rec);
       } catch (err) {
         log.error('images create', { error: err.message });
+        if (err.statusCode === 400) return response.badRequest(res, err.message);
         response.internalError(res, err.message);
       }
     },

@@ -38,7 +38,7 @@ function createDrama(db, log, req) {
       meta = {};
     }
   }
-  meta = { ...defaults.metadata, ...meta };
+  meta = { ...defaults.metadata, script_language: 'zh', media_language: 'auto', ...meta };
   if (!meta.storage_folder_label) {
     meta.storage_folder_label = storageLayout.sanitizeFolderLabel(req.title || '');
   }
@@ -163,6 +163,21 @@ function getDrama(db, dramaId, baseUrl) {
     'SELECT * FROM props WHERE drama_id = ? AND deleted_at IS NULL ORDER BY id ASC'
   ).all(drama.id);
   drama.props = props.map((p) => rowToProp(p));
+  // Candidates are preview data; they must not become reference/main images until explicitly selected.
+  const candidates = db.prepare("SELECT id,character_id,scene_id,prop_id,image_url,local_path,generation_metadata FROM image_generations WHERE drama_id = ? AND engine = 'comfyui' AND model_key = 'local:qwen-image-2.1' AND status = 'completed' AND storyboard_id IS NULL AND deleted_at IS NULL ORDER BY id DESC").all(drama.id);
+  const latest = new Map();
+  for (const image of candidates) {
+    if ((!image.local_path && !image.image_url) || storageLayout.parseMetadata(image.generation_metadata).result_usage === 'selected') continue;
+    for (const field of ['character_id', 'scene_id', 'prop_id']) if (image[field] && !latest.has(field + ':' + image[field])) latest.set(field + ':' + image[field], { id: image.id, image_url: image.image_url, local_path: image.local_path });
+  }
+  for (const group of [drama, ...drama.episodes]) {
+    for (const [field, list] of [['character_id', group.characters], ['scene_id', group.scenes], ['prop_id', group.props]]) {
+      for (const entity of list || []) {
+        const candidate = latest.get(field + ':' + entity.id);
+        if (candidate && (candidate.local_path || candidate.image_url) !== (entity.local_path || entity.image_url)) entity.image_candidate = candidate;
+      }
+    }
+  }
   return drama;
 }
 

@@ -1,4 +1,5 @@
 import request from '@/utils/request'
+import { withImageOptions } from '@/utils/imageRequestOptions'
 
 export const propAPI = {
   get(id) {
@@ -16,9 +17,8 @@ export const propAPI = {
   generatePrompt(id, model, style) {
     return request.post(`/props/${id}/generate-prompt`, { model, style })
   },
-  generateImage(id, model, style) {
-    const body = { model, style }
-    if (body.model == null && body.style == null) return request.post(`/props/${id}/generate`)
+  generateImage(id, model, style, options = {}) {
+    const body = withImageOptions({ ...options, ...(model != null && { model }), ...(style != null && { style }) }, 'prop')
     return request.post(`/props/${id}/generate`, body)
   },
   extractFromScript(episodeId) {

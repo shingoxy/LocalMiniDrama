@@ -280,6 +280,7 @@ import { useTheme } from '@/composables/useTheme'
 import { runWorkflowGroup } from '@/composables/useCanvasWorkflowRunner'
 import { CANVAS_CONTEXT_KEY } from '@/composables/useCanvasContext'
 import { useCanvasStoryboardMedia } from '@/composables/useCanvasStoryboardMedia'
+import { useGenerationTaskStore, GEN_RESOURCE } from '@/stores/generationTaskStore'
 import { useCanvasCrud } from '@/composables/useCanvasCrud'
 import { useCanvasEpisodeGenerate } from '@/composables/useCanvasEpisodeGenerate'
 import { useCanvasScript, scriptNodeId } from '@/composables/useCanvasScript'
@@ -323,7 +324,10 @@ import CanvasFlowAligner from '@/components/dramaCanvas/CanvasFlowAligner.vue'
 const route = useRoute()
 const router = useRouter()
 const { isDark, toggle: toggleTheme } = useTheme()
-const { imagesBySbId, videosBySbId, loadForDrama } = useCanvasStoryboardMedia()
+const { imagesBySbId, videosBySbId, loadForDrama, loadForStoryboards } = useCanvasStoryboardMedia()
+const genStore = useGenerationTaskStore()
+const watchedVideoTaskIds = new Set()
+let disposed = false
 
 const loading = ref(false)
 const drama = ref(null)
@@ -714,10 +718,37 @@ async function loadDrama(silent = false) {
     if (route.query.episode) filterEpisodeId.value = Number(route.query.episode)
     await loadForDrama(drama.value, filterEpisodeId.value)
     rebuildGraph()
+    recoverVideoTasks()
   } catch (e) {
     if (!silent) ElMessage.error(e?.message || '加载项目失败')
   } finally {
     if (!silent) loading.value = false
+  }
+}
+
+/** 进入画布时接续后台视频任务，完成后刷新媒体节点。 */
+function recoverVideoTasks() {
+  const did = drama.value?.id
+  for (const ep of drama.value?.episodes || []) {
+    if (filterEpisodeId.value != null && Number(ep.id) !== Number(filterEpisodeId.value)) continue
+    for (const sb of ep.storyboards || []) {
+      for (const video of videosBySbId.value[sb.id] || []) {
+        if (!video.task_id || !['pending', 'processing'].includes(video.status) || watchedVideoTaskIds.has(video.task_id)) continue
+        watchedVideoTaskIds.add(video.task_id)
+        genStore.attachPollIfNeeded(video.task_id, {
+          dramaId: did,
+          episodeId: ep.id,
+          resourceType: GEN_RESOURCE.SB_VIDEO,
+          resourceId: sb.id,
+          label: `分镜视频 #${sb.storyboard_number ?? sb.id}`,
+        }, async () => {
+          if (disposed || Number(drama.value?.id) !== Number(did)) return
+          await loadForStoryboards([sb])
+          rebuildGraph()
+        }).catch((e) => console.warn('[DramaCanvas] video recovery failed:', e?.message))
+          .finally(() => watchedVideoTaskIds.delete(video.task_id))
+      }
+    }
   }
 }
 
@@ -888,6 +919,7 @@ function onNodeClick({ node, event }) {
 watch(filterEpisodeId, async (val) => {
   if (drama.value) await loadForDrama(drama.value, val)
   rebuildGraph()
+  recoverVideoTasks()
   const query = { ...route.query }
   if (val != null) query.episode = String(val)
   else delete query.episode
@@ -906,6 +938,7 @@ watch(() => route.params.id, () => {
 watch(drama, () => startStatusPoll())
 
 onBeforeUnmount(() => {
+  disposed = true
   if (saveTimer) clearTimeout(saveTimer)
   if (savedHintTimer) clearTimeout(savedHintTimer)
   if (paneClickSuppressTimer) clearTimeout(paneClickSuppressTimer)

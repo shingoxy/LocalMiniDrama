@@ -566,18 +566,23 @@
                   <div class="asset-cover-wrap">
                     <div
                       class="asset-cover"
-                      :class="{ 'asset-cover--clickable': hasAssetImage(char), 'asset-cover--dragover': dragOverResourceKey === 'char-' + char.id }"
+                      :class="{ 'asset-cover--clickable': !!assetPreviewUrl(char), 'asset-cover--dragover': dragOverResourceKey === 'char-' + char.id }"
                       role="button"
                       tabindex="0"
-                      @click="hasAssetImage(char) && openImagePreview(assetImageUrl(char))"
+                      @click="assetPreviewUrl(char) && openImagePreview(assetPreviewUrl(char))"
                       @dragover="onResourceDragOver($event, 'character', char.id)"
                       @dragleave="onResourceDragLeave($event, 'char-' + char.id)"
                       @drop="onResourceDrop($event, 'character', char.id)"
                     >
-                      <img v-if="hasAssetImage(char)" :src="assetImageUrl(char)" class="cover-img" alt="" />
+                      <img v-if="assetPreviewUrl(char)" :src="assetPreviewUrl(char)" class="cover-img" alt="" />
                       <div v-else-if="char.error_msg || char.errorMsg" class="cover-placeholder error" :title="char.error_msg || char.errorMsg">{{ char.error_msg || char.errorMsg }}</div>
                       <div v-else class="cover-placeholder">暂无图</div>
                       <div v-if="dragOverResourceKey === 'char-' + char.id" class="asset-cover-drop-hint">松开上传</div>
+                    </div>
+                    <div v-if="char.image_candidate" class="asset-candidate-actions">
+                      <span>候选 #{{ char.image_candidate.id }}，未选用</span>
+                      <el-button text size="small" @click="openImagePreview(assetImageUrl(char.image_candidate))">预览</el-button>
+                      <el-button type="primary" size="small" :loading="selectingAssetCandidateId === char.image_candidate.id" @click="selectAssetCandidate(char)">选用</el-button>
                     </div>
                     <!-- 额外参考图条 -->
                     <div v-if="parseExtraImages(char).length" class="extra-images-strip">
@@ -664,18 +669,23 @@
                   <div class="asset-cover-wrap">
                     <div
                       class="asset-cover"
-                      :class="{ 'asset-cover--clickable': hasAssetImage(prop), 'asset-cover--dragover': dragOverResourceKey === 'prop-' + prop.id }"
+                      :class="{ 'asset-cover--clickable': !!assetPreviewUrl(prop), 'asset-cover--dragover': dragOverResourceKey === 'prop-' + prop.id }"
                       role="button"
                       tabindex="0"
-                      @click="hasAssetImage(prop) && openImagePreview(assetImageUrl(prop))"
+                      @click="assetPreviewUrl(prop) && openImagePreview(assetPreviewUrl(prop))"
                       @dragover="onResourceDragOver($event, 'prop', prop.id)"
                       @dragleave="onResourceDragLeave($event, 'prop-' + prop.id)"
                       @drop="onResourceDrop($event, 'prop', prop.id)"
                     >
-                      <img v-if="hasAssetImage(prop)" :src="assetImageUrl(prop)" class="cover-img" alt="" />
+                      <img v-if="assetPreviewUrl(prop)" :src="assetPreviewUrl(prop)" class="cover-img" alt="" />
                       <div v-else-if="prop.error_msg || prop.errorMsg" class="cover-placeholder error" :title="prop.error_msg || prop.errorMsg">{{ prop.error_msg || prop.errorMsg }}</div>
                       <div v-else class="cover-placeholder">暂无图</div>
                       <div v-if="dragOverResourceKey === 'prop-' + prop.id" class="asset-cover-drop-hint">松开上传</div>
+                    </div>
+                    <div v-if="prop.image_candidate" class="asset-candidate-actions">
+                      <span>候选 #{{ prop.image_candidate.id }}，未选用</span>
+                      <el-button text size="small" @click="openImagePreview(assetImageUrl(prop.image_candidate))">预览</el-button>
+                      <el-button type="primary" size="small" :loading="selectingAssetCandidateId === prop.image_candidate.id" @click="selectAssetCandidate(prop)">选用</el-button>
                     </div>
                     <div v-if="parseExtraImages(prop).length" class="extra-images-strip">
                       <div v-for="ep in parseExtraImages(prop)" :key="ep" class="extra-thumb" title="点击设为主图（悬停左上角可放大预览）">
@@ -765,18 +775,23 @@
                   <div class="asset-cover-wrap">
                     <div
                       class="asset-cover"
-                      :class="{ 'asset-cover--clickable': hasAssetImage(scene), 'asset-cover--dragover': dragOverResourceKey === 'scene-' + scene.id }"
+                      :class="{ 'asset-cover--clickable': !!assetPreviewUrl(scene), 'asset-cover--dragover': dragOverResourceKey === 'scene-' + scene.id }"
                       role="button"
                       tabindex="0"
-                      @click="hasAssetImage(scene) && openImagePreview(assetImageUrl(scene))"
+                      @click="assetPreviewUrl(scene) && openImagePreview(assetPreviewUrl(scene))"
                       @dragover="onResourceDragOver($event, 'scene', scene.id)"
                       @dragleave="onResourceDragLeave($event, 'scene-' + scene.id)"
                       @drop="onResourceDrop($event, 'scene', scene.id)"
                     >
-                      <img v-if="hasAssetImage(scene)" :src="assetImageUrl(scene)" class="cover-img" alt="" />
+                      <img v-if="assetPreviewUrl(scene)" :src="assetPreviewUrl(scene)" class="cover-img" alt="" />
                       <div v-else-if="scene.error_msg || scene.errorMsg" class="cover-placeholder error" :title="scene.error_msg || scene.errorMsg">{{ scene.error_msg || scene.errorMsg }}</div>
                       <div v-else class="cover-placeholder">暂无图</div>
                       <div v-if="dragOverResourceKey === 'scene-' + scene.id" class="asset-cover-drop-hint">松开上传</div>
+                    </div>
+                    <div v-if="scene.image_candidate" class="asset-candidate-actions">
+                      <span>候选 #{{ scene.image_candidate.id }}，未选用</span>
+                      <el-button text size="small" @click="openImagePreview(assetImageUrl(scene.image_candidate))">预览</el-button>
+                      <el-button type="primary" size="small" :loading="selectingAssetCandidateId === scene.image_candidate.id" @click="selectAssetCandidate(scene)">选用</el-button>
                     </div>
                     <div v-if="parseExtraImages(scene).length" class="extra-images-strip">
                       <div v-for="ep in parseExtraImages(scene)" :key="ep" class="extra-thumb" title="点击设为主图（悬停左上角可放大预览）">
@@ -1750,6 +1765,16 @@
             </div>
           </div>
         </el-form-item>
+        <el-form-item v-if="editCharacterForm.image_candidate" label="本地候选">
+          <div class="asset-cover-wrap">
+            <img :src="assetImageUrl(editCharacterForm.image_candidate)" class="ref-preview-img" @click="openImagePreview(assetImageUrl(editCharacterForm.image_candidate))" />
+            <div class="asset-candidate-actions">
+              <span>候选 #{{ editCharacterForm.image_candidate.id }}，未选用</span>
+              <el-button text size="small" @click="openImagePreview(assetImageUrl(editCharacterForm.image_candidate))">预览</el-button>
+              <el-button type="primary" size="small" :loading="selectingAssetCandidateId === editCharacterForm.image_candidate.id" @click="selectAssetCandidate(editCharacterForm)">选用</el-button>
+            </div>
+          </div>
+        </el-form-item>
         <el-form-item label="名称" required>
           <el-input v-model="editCharacterForm.name" placeholder="角色名称" />
         </el-form-item>
@@ -1896,6 +1921,16 @@
             </div>
           </div>
         </el-form-item>
+        <el-form-item v-if="editPropForm.image_candidate" label="本地候选">
+          <div class="asset-cover-wrap">
+            <img :src="assetImageUrl(editPropForm.image_candidate)" class="ref-preview-img" @click="openImagePreview(assetImageUrl(editPropForm.image_candidate))" />
+            <div class="asset-candidate-actions">
+              <span>候选 #{{ editPropForm.image_candidate.id }}，未选用</span>
+              <el-button text size="small" @click="openImagePreview(assetImageUrl(editPropForm.image_candidate))">预览</el-button>
+              <el-button type="primary" size="small" :loading="selectingAssetCandidateId === editPropForm.image_candidate.id" @click="selectAssetCandidate(editPropForm)">选用</el-button>
+            </div>
+          </div>
+        </el-form-item>
         <el-form-item label="名称" required>
           <el-input v-model="editPropForm.name" placeholder="道具名称" />
         </el-form-item>
@@ -1952,6 +1987,16 @@
             </div>
             <div v-else-if="editSceneForm.id && (editSceneForm.image_url || editSceneForm.local_path) && !editSceneForm.prompt" class="ref-actions">
               <el-button size="small" :loading="extractingSceneDesc" @click="doExtractSceneFromImage">从主图提取描述</el-button>
+            </div>
+          </div>
+        </el-form-item>
+        <el-form-item v-if="editSceneForm.image_candidate" label="本地候选">
+          <div class="asset-cover-wrap">
+            <img :src="assetImageUrl(editSceneForm.image_candidate)" class="ref-preview-img" @click="openImagePreview(assetImageUrl(editSceneForm.image_candidate))" />
+            <div class="asset-candidate-actions">
+              <span>候选 #{{ editSceneForm.image_candidate.id }}，未选用</span>
+              <el-button text size="small" @click="openImagePreview(assetImageUrl(editSceneForm.image_candidate))">预览</el-button>
+              <el-button type="primary" size="small" :loading="selectingAssetCandidateId === editSceneForm.image_candidate.id" @click="selectAssetCandidate(editSceneForm)">选用</el-button>
             </div>
           </div>
         </el-form-item>
@@ -2655,6 +2700,7 @@ import { ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Setting, Plus, Minus, Sunny,
 import { useTheme } from '@/composables/useTheme'
 import { useFilmStore } from '@/stores/film'
 import { useGenerationTaskStore, GEN_RESOURCE } from '@/stores/generationTaskStore'
+import { getTaskPollInterval } from '@/utils/generationPolling'
 import { syncGeneratingSetsFromStore, buildEpisodeContext, buildExtractTaskMeta, isEpisodeExtractRunning } from '@/composables/useGenerationTaskSync'
 import { dramaAPI } from '@/api/drama'
 import { generationAPI } from '@/api/generation'
@@ -3606,6 +3652,27 @@ function assetImageUrl(item) {
 function hasAssetImage(item) {
   if (!item) return false
   return !!(item.image_url || item.local_path)
+}
+function assetPreviewUrl(item) {
+  return assetImageUrl(item) || assetImageUrl(item?.image_candidate)
+}
+const selectingAssetCandidateId = ref(null)
+async function selectAssetCandidate(item) {
+  const id = item?.image_candidate?.id
+  if (!id || selectingAssetCandidateId.value != null) return
+  selectingAssetCandidateId.value = id
+  try {
+    await imagesAPI.select(id)
+    item.image_url = item.image_candidate.image_url || ''
+    item.local_path = item.image_candidate.local_path || ''
+    item.image_candidate = null
+    await loadDrama()
+    ElMessage.success('候选已选用')
+  } catch (e) {
+    ElMessage.error(e.message || '选用失败')
+  } finally {
+    selectingAssetCandidateId.value = null
+  }
 }
 function getSelectedStyle() {
   return getSelectedStylePrompt()
@@ -4625,7 +4692,7 @@ async function loadDrama() {
     projectAspectRatio.value = (d.metadata && d.metadata.aspect_ratio) ? d.metadata.aspect_ratio : '16:9'
     videoClipDuration.value = (d.metadata && d.metadata.video_clip_duration) ? Number(d.metadata.video_clip_duration) : 5
     scriptLanguage.value = d.metadata?.script_language || 'zh'
-    mediaLanguage.value = d.metadata?.media_language || (d.style === 'western short drama' ? 'en' : 'auto')
+    mediaLanguage.value = d.metadata?.media_language || 'auto'
     storyboardIncludeNarration.value = !!(d.metadata && d.metadata.storyboard_include_narration)
     storyboardUniversalOmni.value = !!(d.metadata && d.metadata.storyboard_universal_omni)
     storyboardUseFirstLastFrame.value = !!(d.metadata && d.metadata.storyboard_use_first_last_frame)
@@ -7272,8 +7339,9 @@ function pollTaskWithPause(taskId, onDone, meta = {}) {
   if (trackInStore && taskId) {
     genStore.markRunning({ ...resolvedMeta, taskId })
   }
-  const maxAttempts = 3600  // 3600 × 2s = 120 分钟，覆盖本地 H3
-  const interval = 2000
+  const maxAttempts = resolvedMeta.resourceType === GEN_RESOURCE.SB_VIDEO ? Infinity : 3600
+  const startedAt = Date.now()
+  const nextInterval = () => getTaskPollInterval(resolvedMeta.resourceType, Date.now() - startedAt)
   let attempts = 0
   return new Promise((resolve, reject) => {
     const finishStore = (status, error) => {
@@ -7314,14 +7382,14 @@ function pollTaskWithPause(taskId, onDone, meta = {}) {
       } catch (pollErr) {
         console.warn('[pollTaskWithPause] poll attempt failed:', pollErr?.message)
       }
-      if (attempts < maxAttempts) setTimeout(tick, interval)
+      if (attempts < maxAttempts) setTimeout(tick, nextInterval())
       else {
-        const timeoutMsg = '任务查询超时（超过15分钟）'
+        const timeoutMsg = '任务查询超时（超过120分钟）'
         finishStore('failed', timeoutMsg)
         resolve({ status: 'timeout', error: timeoutMsg })
       }
     }
-    setTimeout(tick, interval)
+    setTimeout(tick, nextInterval())
   })
 }
 
@@ -9531,6 +9599,15 @@ html.light .section-desc { color: #6b7280; }
   padding: 6px 8px;
   border-top: 1px solid rgba(255,255,255,0.06);
 }
+.asset-candidate-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.asset-candidate-actions > span { width: 100%; color: #a78bfa; }
 .asset-cover-actions .el-button { flex: 1; justify-content: center; }
 html.light .asset-cover-actions { border-top-color: rgba(139,92,246,0.1); }
 /* 额外参考图缩略图条 */

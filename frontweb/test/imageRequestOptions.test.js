@@ -9,6 +9,14 @@ test('temporary image choices are scoped to the active project and explicit requ
   clearImageRequestOptions(7)
   assert.equal(withImageOptions({ drama_id: 7 }, 'first').seed, undefined)
 })
+test('prop image options share project defaults and preserve explicit request overrides', () => {
+  setImageRequestOptions(7, { prop: { image_model_key: 'local:qwen-image-2.1', seed: 42 } })
+  assert.equal(imagePurpose({ prop_id: 16 }), 'prop')
+  assert.equal(withImageOptions({ prop_id: 16 }, 'prop').drama_id, 7)
+  assert.equal(withImageOptions({ prop_id: 16 }, 'prop').image_model_key, 'local:qwen-image-2.1')
+  assert.equal(withImageOptions({ prop_id: 16, seed: 24 }, 'prop').seed, 24)
+  clearImageRequestOptions(7)
+})
 test('character, scene, canvas and batch wrappers share purpose options without leaking to text/video requests', () => {
   setImageRequestOptions(7, { character: { image_model_key: 'local:flux1-dev' }, scene: { image_model_key: 'local:qwen-image-2.1' } })
   assert.equal(withImageOptions({ model: undefined }, 'character').image_model_key, 'local:flux1-dev')

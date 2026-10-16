@@ -3,6 +3,7 @@ import { ref, computed } from 'vue'
 import { taskAPI } from '@/api/task'
 import { imagesAPI } from '@/api/images'
 import { videosAPI } from '@/api/videos'
+import { getTaskPollInterval } from '@/utils/generationPolling'
 
 /** 资源类型常量 */
 export const GEN_RESOURCE = {
@@ -204,7 +205,7 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
     const now = Date.now()
 
     for (const t of running) {
-      if (t.startedAt && now - t.startedAt > STALE_TASK_MS) {
+      if (t.resourceType !== GEN_RESOURCE.SB_VIDEO && t.startedAt && now - t.startedAt > STALE_TASK_MS) {
         markFailed(t, '任务等待超时，已自动清除（请刷新确认是否已完成）')
         continue
       }
@@ -224,7 +225,7 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
             markDone(t)
             continue
           }
-          if (isOrphanedProcessingTask(remote)) {
+          if (t.resourceType !== GEN_RESOURCE.SB_VIDEO && isOrphanedProcessingTask(remote)) {
             markFailed(t, ORPHAN_TASK_MSG)
           }
         } catch (_) {
@@ -255,13 +256,25 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
     if (!taskId) return Promise.resolve({ status: 'failed', error: '缺少 task_id' })
 
     const key = markRunning({ ...meta, taskId })
-
-    if (pollPromises.value.has(taskId)) {
-      return pollPromises.value.get(taskId)
+    const notifyDone = async (result) => {
+      if (result.status === 'completed' && onDone) {
+        try {
+          await onDone()
+        } catch (e) {
+          console.warn('[generationTaskStore] onDone failed:', e?.message)
+        }
+      }
+      return result
     }
 
-    const maxAttempts = options.maxAttempts ?? 450
-    const interval = options.interval ?? 2000
+    if (pollPromises.value.has(taskId)) {
+      return pollPromises.value.get(taskId).then(notifyDone)
+    }
+
+    const isVideo = meta.resourceType === GEN_RESOURCE.SB_VIDEO
+    const maxAttempts = options.maxAttempts ?? (isVideo ? Infinity : 450)
+    const startedAt = Date.now()
+    const nextInterval = () => options.interval ?? getTaskPollInterval(meta.resourceType, Date.now() - startedAt)
     const showErrorToast = options.showErrorToast !== false
     const showTimeoutToast = options.showTimeoutToast !== false
 
@@ -276,7 +289,10 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
         attempts++
         try {
           const t = await taskAPI.get(taskId)
-          if (isOrphanedProcessingTask(t)) {
+          if (cancelledPollTaskIds.value.has(taskId)) {
+            return resolve({ status: 'cancelled', error: '任务轮询已停止' })
+          }
+          if (!isVideo && isOrphanedProcessingTask(t)) {
             const errMsg = ORPHAN_TASK_MSG
             markFailed(key, errMsg)
             if (showErrorToast && options.ElMessage) {
@@ -285,13 +301,6 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
             return resolve({ status: 'failed', error: errMsg })
           }
           if (t.status === 'completed') {
-            if (onDone) {
-              try {
-                await onDone()
-              } catch (e) {
-                console.warn('[generationTaskStore] onDone failed:', e?.message)
-              }
-            }
             markDone(key)
             return resolve({ status: 'completed', result: t.result })
           }
@@ -307,7 +316,7 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
           console.warn('[generationTaskStore] poll attempt failed:', pollErr?.message)
         }
         if (attempts < maxAttempts) {
-          setTimeout(tick, interval)
+          setTimeout(tick, nextInterval())
         } else {
           const timeoutMsg = options.timeoutMessage
             || '生成任务已超时（超过15分钟），请刷新页面查看是否已完成'
@@ -318,20 +327,19 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
           resolve({ status: 'timeout', error: timeoutMsg })
         }
       }
-      setTimeout(tick, interval)
+      setTimeout(tick, nextInterval())
     })
 
-    const nextPolls = new Map(pollPromises.value)
-    nextPolls.set(taskId, promise)
-    pollPromises.value = nextPolls
-
-    return promise.finally(() => {
+    const tracked = promise.finally(() => {
       stopped = true
-      cancelledPollTaskIds.value = new Set([...cancelledPollTaskIds.value, taskId])
       const cleaned = new Map(pollPromises.value)
       cleaned.delete(taskId)
       pollPromises.value = cleaned
     })
+    const nextPolls = new Map(pollPromises.value)
+    nextPolls.set(taskId, tracked)
+    pollPromises.value = nextPolls
+    return tracked.then(notifyDone)
   }
 
   /**
@@ -341,13 +349,12 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
     if (!taskId) return null
 
     if (pollPromises.value.has(taskId)) {
-      markRunning({ ...meta, taskId })
-      return pollPromises.value.get(taskId)
+      return pollTask(taskId, meta, onDone, options)
     }
 
     try {
       const t = await taskAPI.get(taskId)
-      if (isOrphanedProcessingTask(t)) {
+      if (meta.resourceType !== GEN_RESOURCE.SB_VIDEO && isOrphanedProcessingTask(t)) {
         markFailed({ ...meta, taskId }, ORPHAN_TASK_MSG)
         return { status: 'failed', error: ORPHAN_TASK_MSG }
       }
@@ -374,7 +381,7 @@ export const useGenerationTaskStore = defineStore('generationTask', () => {
 
   async function _recoverAttachTask(taskId, meta, onDone, pollOpts) {
     if (!taskId) return
-    if (recoveredTaskIds.value.has(taskId)) {
+    if (meta.resourceType !== GEN_RESOURCE.SB_VIDEO && recoveredTaskIds.value.has(taskId)) {
       try {
         const t = await taskAPI.get(taskId)
         if (t.status === 'completed') markDone({ ...meta, taskId })

@@ -24,12 +24,26 @@ test('English media is independent of Chinese screenplay; ordinary projects rema
   assert.equal(translate.mock.callCount(), 1);
 });
 
-test('Western preset defaults to English media, with an explicit opt-out', (t) => {
+test('media follows the prompt regardless of style unless English is explicitly selected', (t) => {
   const db = fixture(t, {}, 'western short drama');
-  assert.equal(media.isEnglishMedia(db, 1), true);
+  assert.equal(media.isEnglishMedia(db, 1), false);
   db.prepare('UPDATE dramas SET metadata = ? WHERE id = 1').run('{"media_language":"auto"}');
   assert.equal(media.isEnglishMedia(db, 1), false);
-  assert.equal(require('../src/services/westernShortDramaPreset').CREATION_DEFAULTS.metadata.media_language, 'en');
+  db.prepare('UPDATE dramas SET metadata = ? WHERE id = 1').run('{"media_language":"en"}');
+  assert.equal(media.isEnglishMedia(db, 1), true);
+});
+
+test('new projects default to Chinese and prompt language while explicit language choices are retained', t => {
+  const db = fixture(t);
+  require('../src/services/settingsService').setGlobalSetting(db, 'creation_defaults', { metadata: { aspect_ratio: '9:16', script_language: 'en', media_language: 'en' } });
+  const dramas = require('../src/services/dramaService');
+  const created = dramas.createDrama(db, quiet, { title: '中文默认' });
+  assert.equal(created.metadata.script_language, 'zh');
+  assert.equal(created.metadata.media_language, 'auto');
+  assert.equal(created.metadata.aspect_ratio, '9:16');
+  const explicit = dramas.createDrama(db, quiet, { title: 'Explicit', metadata: { script_language: 'en', media_language: 'en' } });
+  assert.equal(explicit.metadata.script_language, 'en');
+  assert.equal(explicit.metadata.media_language, 'en');
 });
 
 test('Translation preserves Seedance machine references and rejects Chinese or lost references', async (t) => {

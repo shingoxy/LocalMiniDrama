@@ -118,6 +118,7 @@ function routes(db, cfg, log, uploadService) {
         });
       } catch (err) {
         log.error('characters generate-image', { error: err.message });
+        if (err.statusCode === 400) return response.badRequest(res, err.message);
         response.internalError(res, err.message);
       }
     },
@@ -265,6 +266,7 @@ function routes(db, cfg, log, uploadService) {
         response.success(res, { message: '四视图生成任务已提交', image_generation: out.image_generation });
       } catch (err) {
         log.error('characters generate-four-view-image', { error: err.message });
+        if (err.statusCode === 400) return response.badRequest(res, err.message);
         response.internalError(res, err.message);
       }
     },

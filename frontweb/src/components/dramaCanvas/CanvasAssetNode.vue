@@ -38,7 +38,7 @@
 <script setup>
 import { computed } from 'vue'
 import { Handle, Position } from '@vue-flow/core'
-import { assetImageUrl } from '@/utils/mediaUrl'
+import { assetImageUrl, assetPreviewUrl } from '@/utils/mediaUrl'
 import { useCanvasContext } from '@/composables/useCanvasContext'
 import CanvasAssetPanel from './CanvasAssetPanel.vue'
 import CanvasNodeStatusOverlay from './CanvasNodeStatusOverlay.vue'
@@ -66,7 +66,7 @@ const displayName = computed(() => {
   return e.name || e.location || '未命名'
 })
 
-const thumbUrl = computed(() => assetImageUrl(props.data.entity))
+const thumbUrl = computed(() => assetPreviewUrl(props.data.entity))
 const entityStatus = computed(() => props.data.entity?.status || '')
 
 const isNodeBusy = computed(() => {
@@ -81,7 +81,7 @@ const statusChip = computed(() => {
   const s = entityStatus.value
   if (s === 'processing') return { key: 'processing', label: '生成中' }
   if (s === 'failed') return { key: 'failed', label: '失败' }
-  if (thumbUrl.value) return { key: 'ready', label: '有图' }
+  if (thumbUrl.value) return { key: 'ready', label: assetImageUrl(props.data.entity) ? '有图' : '候选，未选用' }
   return null
 })
 </script>

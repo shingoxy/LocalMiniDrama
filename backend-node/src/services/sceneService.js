@@ -49,7 +49,11 @@ function updateScenePrompt(db, log, sceneId, req) {
 
 function deleteScene(db, log, sceneId) {
   const now = new Date().toISOString();
-  const result = db.prepare('UPDATE scenes SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').run(now, Number(sceneId));
+  const result = db.transaction(() => {
+    const result = db.prepare('UPDATE scenes SET deleted_at = ? WHERE id = ? AND deleted_at IS NULL').run(now, Number(sceneId));
+    if (result.changes) db.prepare('UPDATE storyboards SET scene_id = NULL, updated_at = ? WHERE scene_id = ?').run(now, Number(sceneId));
+    return result;
+  })();
   if (result.changes === 0) return { ok: false, error: 'scene not found' };
   log.info('Scene deleted', { scene_id: sceneId });
   return { ok: true };
@@ -95,9 +99,12 @@ function createSceneForEpisode(db, log, dramaId, episodeId, req) {
 function deleteScenesByEpisodeId(db, log, episodeId) {
   const now = new Date().toISOString();
   try {
-    const result = db.prepare('UPDATE scenes SET deleted_at = ? WHERE episode_id = ? AND deleted_at IS NULL').run(now, Number(episodeId));
-    log.info('Scenes deleted by episode', { episode_id: episodeId, count: result.changes });
-    return result.changes;
+    const count = db.transaction(() => {
+      db.prepare('UPDATE storyboards SET scene_id = NULL, updated_at = ? WHERE scene_id IN (SELECT id FROM scenes WHERE episode_id = ? AND deleted_at IS NULL)').run(now, Number(episodeId));
+      return db.prepare('UPDATE scenes SET deleted_at = ? WHERE episode_id = ? AND deleted_at IS NULL').run(now, Number(episodeId)).changes;
+    })();
+    log.info('Scenes deleted by episode', { episode_id: episodeId, count });
+    return count;
   } catch (e) {
     if ((e.message || '').includes('episode_id')) return 0;
     throw e;
