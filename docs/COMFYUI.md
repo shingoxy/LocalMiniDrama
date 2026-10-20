@@ -43,7 +43,22 @@ Mapping 保存源文件名、SHA256、Mode、FPS、帧网格和模型节点。�
 | Audio | `null` | 不接外部音频；保留源图生成的原生音频 |
 | Output | `92.filename_prefix` | 唯一输出前缀，读取其 MP4 |
 
-模型加载器、LoRA、Sampler、Scheduler、原生音频链与 VAE 沿用模板。模型主加载器使用源 Workflow 的 `minimax_h3_fl2va_pruned_int8_convrot.safetensors`；使用何种视频模式由当前连接和 Prompt 决定，加载器名称不代表尾帧已连接。
+默认模板已切换为 **LightX2V FL2VA Turbo 4-step v0.1**。基础模型仍为 `minimax_h3_fl2va_pruned_int8_convrot.safetensors`，文本编码器、视频 / 音频 VAE、原生音频、图像缩放、24 FPS 和帧数公式保留。原专用 LoRA 叠加由一个加速 LoRA 替换：
+
+| 参数 | 当前默认 |
+| --- | --- |
+| LoRA | `minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy_resized_avg_rank_21_bf16.safetensors` |
+| 节点 / 强度 | `LoraLoaderModelOnly` / `1.0` |
+| Sampler / Scheduler | `euler` / `simple` |
+| Steps / Denoise | `4` / `1.0` |
+| Video / Audio Shift | `MiniMaxH3SigmaShift`，`12` / `3` |
+| Mapping Version | `2` |
+
+将加速 LoRA 放在 ComfyUI 的 `models/loras/` 根目录；本机已有此文件，不需要另行下载。文件 SHA256 为 `3a069f26fbc33f377a60dc72dd9e15f2aa42aa1d1b44915fded835716672dd36`，对应 [Kijai 发布文件](https://huggingface.co/Kijai/MiniMax-H3_comfy/blob/main/loras/minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy_resized_avg_rank_21_bf16.safetensors)。四步、Euler 与 shift 配套参考 [LightX2V 模型规格](https://github.com/ModelTC/Minimax-H3-Turbo#1-model-specs) 和 [ComfyUI 接线说明](https://github.com/ModelTC/Minimax-H3-Turbo/blob/main/COMFYUI_SETUP_AND_INFERENCE.md)。这条模板使用 ComfyUI 核心节点，不混用另一套 H3 Turbo LoRA 的专用采样器。
+
+v0.1 在 544p 混合比例训练；现有分辨率不会自动下调，高分辨率的人脸、动作和音频质量仍需实测。四步减少采样计算次数，模型加载、内存卸载与 VAE 耗时不会同比缩短，不能据此承诺总耗时。缺少 LoRA 或 `MiniMaxH3SigmaShift` 时，连接检查明确报错。
+
+I2VA / FL2VA 继续由参考帧和 Prompt 决定。上述导出工具仅机械展开原始保存图，重新执行会覆盖模板；重新导出的文件需应用本节加速配置及首尾帧 Mapping 后才能替代当前默认。
 
 源缩放节点使用 nearest-exact、1 megapixel、32 倍数对齐。默认宽高从首帧实际缩放结果取得；可通过已有提交接口传 32 倍数的宽高，但界面不额外改写源缩放策略。
 
@@ -93,4 +108,4 @@ Pending 任务只删除对应 `prompt_id`。Running 使用 ComfyUI interrupt，�
 
 缺少节点、模型或 LoRA 时保留原错误，由现有 ComfyUI 环境处理。服务离线、执行失败、输出无 MP4、下载失败或超时都结束本地记录，不会产生收费 fallback。
 
-代码测试通过 Mock HTTP 服务检查提交、Queue、History、取消和输出获取。Mock MP4 标识检查不等于真实视频解码或视觉质量验证。真实 5 秒 H3 生成、有效 MP4、导入、合成、本机成功耗时与批量稳定性仍需要单独实机验证。
+2026-10-20 四步模板切换后，后端 151 项测试通过，覆盖 I2VA / FL2VA 加速链绑定、缺少加速 LoRA 或 shift 节点时的明确报错，以及原有 Mock HTTP 提交、Queue、History、取消和输出获取。当前 ComfyUI 的节点 / 权重只读检查通过，I2VA / FL2VA 输出依赖图分别包含 21 / 23 个节点。本轮未提交 GPU 或云端生成任务；旧版 H3 的视频结果不能证明四步版本的速度、画质或音频质量，这些仍需单独实机验证。

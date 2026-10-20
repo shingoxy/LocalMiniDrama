@@ -80,7 +80,7 @@
   "105_17": {
     "class_type": "KSamplerSelect",
     "inputs": {
-      "sampler_name": "res_multistep"
+      "sampler_name": "euler"
     }
   },
   "105_9": {
@@ -91,7 +91,7 @@
         0
       ],
       "scheduler": "simple",
-      "steps": 20,
+      "steps": 4,
       "denoise": 1
     }
   },
@@ -224,30 +224,19 @@
         "105_6",
         0
       ],
-      "lora_name": "H3_slop_bounce.safetensors",
+      "lora_name": "minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy_resized_avg_rank_21_bf16.safetensors",
       "strength_model": 1
     }
   },
-  "105_144": {
-    "class_type": "LoraLoaderModelOnly",
+  "105_145": {
+    "class_type": "MiniMaxH3SigmaShift",
     "inputs": {
       "model": [
         "105_141",
         0
       ],
-      "lora_name": "Minimax_bounceV07_fl2va-000230_Intense.safetensors",
-      "strength_model": 1
-    }
-  },
-  "105_145": {
-    "class_type": "LoraLoaderModelOnly",
-    "inputs": {
-      "model": [
-        "105_144",
-        0
-      ],
-      "lora_name": "H3_slop_bounce.safetensors",
-      "strength_model": 1
+      "shift_video": 12,
+      "shift_audio": 3
     }
   }
 }

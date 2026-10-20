@@ -21,7 +21,7 @@
 | Storyboard | 列表与画布，经典分镜与全能分镜，提示词编辑、批量生成 |
 | AI Provider | 沿用现有文本、图片、视频接口；包括 DeepSeek、Seedream、Seedance、Kling 等配置与协议 |
 | 混合视频 | 每个 Shot 单独选模型，项目默认、整集与多选批量设置，按 Shot 路由生成 |
-| 本地 H3 | 直接连接现有 ComfyUI，首帧 / 首尾帧输入，Queue / Progress / History / Cancel，长任务跟踪与 MP4 自动预览 |
+| 本地 H3 | 默认 LightX2V 四步加速，直接连接现有 ComfyUI，首帧 / 首尾帧输入，Queue / Progress / History / Cancel，长任务跟踪与 MP4 自动预览 |
 | 本地图片 | 可选 Qwen-Image 2.1，人物、场景、道具、首尾帧候选，历史、自动预览、选用与任务恢复；[使用说明](docs/local-images.md) |
 | Prompt Adapter | Universal Shot Intent，DeepSeek 转换 H3 Prompt，缓存与手工编辑保护 |
 | 成本管理 | 模型价格、月费分摊、重试预算、本机耗时、电费、单集与整季预测 |
@@ -123,10 +123,10 @@ Qwen 自动模式在有参考图时使用编辑工作流，否则使用文生图
 
 模板与映射位于：
 
-- [minimax_h3.json](backend-node/configs/workflows/minimax_h3.json)：从现有保存图展开得到的 22 个执行节点。
+- [minimax_h3.json](backend-node/configs/workflows/minimax_h3.json)：基于现有保存图调整的 LightX2V 四步加速模板。
 - [minimax_h3.mapping.json](backend-node/configs/workflows/minimax_h3.mapping.json)：Prompt、图像、Duration、Frames、FPS、宽高、Seed、Output 与模型节点统一映射。
 
-模板保留原模型、LoRA、Sampler、Scheduler 和缩放链。首帧默认沿用源图的 1MP / 32 倍数缩放，H3 宽高跟随缩放后的图像；FL2VA 尾帧缩放到首帧的目标尺寸。外部音频未连接，不能直接当作 Ref2VA 模板使用。双帧接线与验证范围见 [本地图片及首尾帧说明](docs/local-images.md)，原工作流结构见 [COMFYUI.md](docs/COMFYUI.md)。
+默认 H3 使用本地已有的 LightX2V FL2VA Turbo 4-step v0.1 LoRA（Kijai rank-21 BF16 版本），强度 1，Euler / simple 四步采样，视频 / 音频 shift 为 12 / 3。原专用 LoRA 叠加已移除；基础模型、编码器、VAE 与原生音频链保留。首帧沿用源图的 1MP / 32 倍数缩放，H3 宽高跟随缩放后的图像；FL2VA 尾帧缩放到首帧的目标尺寸。该 LoRA 在 544p 训练，本项目不自动降低现有分辨率，高分辨率质量及实际提速仍需实机验证。外部音频未连接，不能直接当作 Ref2VA 模板使用。双帧接线见 [本地图片及首尾帧说明](docs/local-images.md)，权重、参数和验证边界见 [COMFYUI.md](docs/COMFYUI.md)。
 
 ## Provider-specific Prompt Adapter
 
@@ -225,7 +225,7 @@ SQLite、图片、视频和项目数据存储在配置指定的本机目录。Lo
 
 ## Current Limitations
 
-- 已有本机 H3 单首帧 5 秒样例生成、MP4 解码及列表 / 画布播放记录；FL2VA 双帧视频效果仍待实机验证，不能把接线测试视为画质或一致性证明。
+- 已有旧版 H3 单首帧 5 秒样例生成、MP4 解码及列表 / 画布播放记录；默认四步加速版的速度、画质、音频及 FL2VA 双帧效果仍待实机验证，旧版结果和接线测试不能替代这些验证。
 - 当前 Workflow 支持 I2VA / FL2VA、24 FPS、4–15 秒输入，默认 5 秒；外部音频未连接。输出帧数采用源 Workflow 的网格公式。
 - 本地视频长任务修复使用虚拟时间和隔离浏览器验证，复用已有视频素材，未重新执行 GPU 生成；这些检查不代表生成速度或人物一致性已经改善。
 - 云视频均使用 Mock 验证，真实 Provider 的账户权限、配额与账单需自行确认。
@@ -251,6 +251,8 @@ npm run build
 ```
 
 测试覆盖增量迁移、模型选择、混合分发、Mock ComfyUI 协议、云调用确认、Prompt 缓存与成本公式，以及 Qwen 候选选用、项目素材关联、长任务恢复和一键流程暂停 / 取消，不调用真实收费云视频 API。长任务通过虚拟时钟覆盖 22 分钟生成和更长排队；实机 H3 验证独立执行。
+
+2026-10-20：四步 H3 默认模板切换后，后端 151 项测试通过，当前 ComfyUI 节点及权重只读检查通过；本轮没有提交 GPU 或云端生成任务。
 
 ## Acknowledgements & License
 

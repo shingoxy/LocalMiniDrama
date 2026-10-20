@@ -106,7 +106,7 @@ test('concurrent manual edit is protected while DeepSeek is running',async t=>{
   await assert.rejects(hybrid.optimize(db,log,1,{force:true}),/手工 Prompt 已变化/);
   assert.equal(db.prepare('SELECT user_edited FROM storyboards WHERE id=1').get().user_edited,1);
 });
-test('H3 mapping preserves original math, samplers and loader settings; rejects unsupported inputs',()=>{
+test('H3 mapping preserves turbo sampling and frame math; rejects unsupported inputs',()=>{
   const {workflow,mapping}=comfy.loadTemplate();const bound=comfy.bindWorkflow({prompt:validPrompt(),image:'shot.png',duration:5,seed:42});
   assert.equal(bound.workflow[mapping.fields.prompt.node].inputs.prompt,validPrompt());
   assert.equal(bound.workflow[mapping.fields.seed.node].inputs.noise_seed,42);
@@ -115,6 +115,29 @@ test('H3 mapping preserves original math, samplers and loader settings; rejects 
   assert.throws(()=>comfy.bindWorkflow({duration:5,last_frame:'a.png'}),/未连接/);
   assert.throws(()=>comfy.bindWorkflow({duration:5,fps:30}),/24 FPS/);
 });
+test('default H3 turbo reaches both keyframe modes through one acceleration LoRA and four Euler steps',()=>{
+  for(const last_frame of [undefined,'last.png']) {
+    const {workflow:w,mapping}=comfy.bindWorkflow({prompt:validPrompt(),image:'first.png',last_frame,duration:5,seed:42});
+    assert.equal(mapping.version,2);assert.equal(mapping.mode,last_frame ? 'FL2VA' : 'I2VA');
+    const loras=Object.entries(w).filter(([,n])=>n.class_type==='LoraLoaderModelOnly');
+    assert.equal(loras.length,1);
+    const [id,lora]=loras[0];
+    assert.equal(lora.inputs.lora_name,'minimax_h3_fl2v_lightx2v_turbo_4step_v0.1_comfy_resized_avg_rank_21_bf16.safetensors');
+    assert.equal(lora.inputs.strength_model,1);assert.deepEqual(lora.inputs.model,['105_6',0]);
+    const shifted=w[w['105_16'].inputs.model[0]];
+    assert.equal(shifted.class_type,'MiniMaxH3SigmaShift');
+    assert.deepEqual(shifted.inputs,{model:[id,0],shift_video:12,shift_audio:3});
+    assert.deepEqual(w['105_9'].inputs.model,w['105_16'].inputs.model);
+    const sampler=w['105_14'];
+    assert.equal(w[sampler.inputs.sampler[0]].inputs.sampler_name,'euler');
+    const schedule=w[sampler.inputs.sigmas[0]].inputs;
+    assert.equal(schedule.steps,4);assert.equal(schedule.scheduler,'simple');assert.equal(schedule.denoise,1);
+    assert.equal(w['105_91'].inputs.fps,24);
+    assert.deepEqual(w['105_91'].inputs.audio,['105_23',0]);
+    assert.deepEqual(w['105_104'].inputs.first_frame,['119',0]);
+    assert.deepEqual(w['105_104'].inputs.last_frame,last_frame ? ['last_frame_resized',0] : undefined);
+  }
+});
 test('connection validation permits runtime image uploads but still rejects missing models',async t=>{
   const {workflow}=comfy.loadTemplate();
   const info={};
@@ -122,6 +145,8 @@ test('connection validation permits runtime image uploads but still rejects miss
   info.LoadImage.input.required.image=[['existing.png'],{image_upload:true}];
   const loader=Object.values(workflow).find(node=>node.class_type==='UNETLoader');
   info.UNETLoader.input.required.unet_name=[[loader.inputs.unet_name],{}];
+  const lora=Object.values(workflow).find(node=>node.class_type==='LoraLoaderModelOnly');
+  info.LoraLoaderModelOnly.input.required.lora_name=[[lora.inputs.lora_name],{}];
   const server=http.createServer((req,res)=>{res.setHeader('Content-Type','application/json');res.end(JSON.stringify(info));});
   await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
   t.after(()=>new Promise(resolve=>server.close(resolve)));
@@ -129,6 +154,12 @@ test('connection validation permits runtime image uploads but still rejects miss
   assert.equal(await comfy.validateNodes(base),true);
   info.UNETLoader.input.required.unet_name=[['missing-model.safetensors'],{}];
   await assert.rejects(comfy.validateNodes(base),/当前模型或 LoRA 不可用/);
+  info.UNETLoader.input.required.unet_name=[[loader.inputs.unet_name],{}];
+  info.LoraLoaderModelOnly.input.required.lora_name=[['other-lora.safetensors'],{}];
+  await assert.rejects(comfy.validateNodes(base),/当前模型或 LoRA 不可用/);
+  info.LoraLoaderModelOnly.input.required.lora_name=[[lora.inputs.lora_name],{}];
+  delete info.MiniMaxH3SigmaShift;
+  await assert.rejects(comfy.validateNodes(base),/缺少现有 Workflow 节点.*MiniMaxH3SigmaShift/);
 });
 test('ComfyUI submit, queue, history, MP4 retrieval and cancellation use local protocol',async t=>{
   let submitted=null,deleted=null;

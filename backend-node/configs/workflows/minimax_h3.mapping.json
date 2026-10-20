@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "engine": "minimax-h3",
   "mode": "I2VA",
   "supported_modes": [
@@ -67,9 +67,7 @@
     "105_24",
     "105_6",
     "105_13",
-    "105_141",
-    "105_144",
-    "105_145"
+    "105_141"
   ],
-  "notes": "Saved current graph; first image is resized as in the original graph, dimensions follow that image. Native audio is generated, external audio/last frame are not connected. FL2VA adds an uploaded last frame resized to the first frame target; sampler/loader parameters remain unchanged."
+  "notes": "Adapted from the recorded source graph to LightX2V FL2VA Turbo 4-step v0.1 (Kijai resized rank-21 BF16 LoRA, strength 1). Euler/simple with 4 steps and explicit video/audio shifts 12/3 replaces the original sampler and specialty LoRA chain. Base model, encoders, VAEs, first-image 1MP resizing, 24 FPS and frame math are preserved. External audio is not connected. FL2VA adds an uploaded last frame resized to the first frame target."
 }
