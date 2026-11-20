@@ -1,4 +1,5 @@
 const settingsService = require('../services/settingsService');
+const googleProxyService = require('../services/googleProxyService');
 const response = require('../response');
 const { loadConfig } = require('../config');
 const { resolveVideoGenerationTimeoutMinutes } = require('../config/videoGeneration');
@@ -63,11 +64,59 @@ function updateGenerationSettings(db) {
   };
 }
 
+/** GET /settings/google-proxy — 获取 Google API 代理配置（不返回密码明文） */
+function getGoogleProxy(db) {
+  return (req, res) => {
+    response.success(res, googleProxyService.getPublicConfig(db));
+  };
+}
+
+/** PUT /settings/google-proxy — 保存 Google API 代理配置 */
+function updateGoogleProxy(db, log) {
+  return (req, res) => {
+    try {
+      const saved = googleProxyService.saveConfig(db, req.body || {});
+      log.info('Google proxy config updated', {
+        enabled: saved.enabled,
+        protocol: saved.protocol,
+        host: saved.host,
+        port: saved.port,
+        has_username: Boolean(saved.username),
+        has_password: saved.has_password,
+      });
+      response.success(res, saved);
+    } catch (err) {
+      return response.badRequest(res, err.message || '代理配置参数无效');
+    }
+  };
+}
+
+/** POST /settings/google-proxy/test — 测试 Google API 代理连通性（不消耗模型额度） */
+function testGoogleProxy(db, log) {
+  return async (req, res) => {
+    try {
+      const result = await googleProxyService.testGoogleProxy(db, req.body || {});
+      log.info('Google proxy connectivity test passed', {
+        status: result.status,
+        latency_ms: result.latency_ms,
+        proxy: result.proxy_summary,
+      });
+      response.success(res, result);
+    } catch (err) {
+      log.warn('Google proxy connectivity test failed', { error: err.message });
+      return response.badRequest(res, err.message || '代理连通性测试失败');
+    }
+  };
+}
+
 module.exports = function settingsRoutes(db, cfg, log) {
   return {
     getLanguage: getLanguage(cfg),
     updateLanguage: updateLanguage(cfg, log),
     getGenerationSettings: getGenerationSettings(db),
     updateGenerationSettings: updateGenerationSettings(db),
+    getGoogleProxy: getGoogleProxy(db),
+    updateGoogleProxy: updateGoogleProxy(db, log),
+    testGoogleProxy: testGoogleProxy(db, log),
   };
 };

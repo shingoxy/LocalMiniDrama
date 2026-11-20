@@ -3,6 +3,7 @@ const fs = require('fs');
 const path = require('path');
 const { registerSecret } = require('../utils/redactSecrets');
 const { normalizeMaterialHubToken } = require('./jimengMaterialHubService');
+const googleProxyService = require('./googleProxyService');
 
 function normalizeApiKeyForService(serviceType, apiKey) {
   if (serviceType === 'jimeng2_character_auth' && apiKey != null) {
@@ -255,7 +256,7 @@ function rowToConfig(r) {
  * @param opts { base_url, api_key, model (string|string[]), provider?, endpoint?, settings? }
  * @returns Promise<void> 成功 resolve，失败 reject(error)
  */
-async function testConnection(opts) {
+async function testConnection(opts, db = null) {
   registerSecret(opts.api_key);
   const base = (opts.base_url || '').replace(/\/$/, '');
   if (!base) throw new Error('base_url 必填');
@@ -288,21 +289,27 @@ async function testConnection(opts) {
   if ((provider === 'gemini' || provider === 'google') && serviceType !== 'text') {
     if (serviceType === 'video') {
       // Validate model access without starting a paid Veo operation.
-      const res = await fetch(base + '/v1beta/models/' + encodeURIComponent(model), {
-        headers: { 'x-goog-api-key': opts.api_key },
-      });
-      if (!res.ok) throw new Error(`Veo 模型查询失败: ${res.status} ${(await res.text()).slice(0, 200)}`);
+      const res = await googleProxyService.fetchWithGoogleProxy(
+        base + '/v1beta/models/' + encodeURIComponent(model),
+        { headers: { 'x-goog-api-key': opts.api_key } },
+        db
+      );
+      if (!res.ok) throw new Error(`Google 视频模型查询失败: ${res.status} ${(await res.text()).slice(0, 200)}`);
       return;
     }
     endpoint = endpoint || '/v1beta/models/{model}:generateContent';
     const path = endpoint.replace(/{model}/g, model || 'gemini-pro');
     const url = base + (path.startsWith('/') ? path : '/' + path);
     const body = { contents: [{ parts: [{ text: 'Hello' }] }] };
-    const res = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': opts.api_key },
-      body: JSON.stringify(body),
-    });
+    const res = await googleProxyService.fetchWithGoogleProxy(
+      url,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': opts.api_key },
+        body: JSON.stringify(body),
+      },
+      db
+    );
     if (!res.ok) {
       const text = await res.text();
       throw new Error(`请求失败: ${res.status} ${text.slice(0, 200)}`);
@@ -456,14 +463,18 @@ async function testConnection(opts) {
     body
   );
   console.log('[testConnection] 文本/chat 服务', { url, serviceType, model });
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: 'Bearer ' + (opts.api_key || ''),
+  const res = await googleProxyService.fetchWithGoogleProxy(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer ' + (opts.api_key || ''),
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    db
+  );
   if (!res.ok) {
     const text = await res.text();
     let errMsg = `请求失败: ${res.status}`;
@@ -587,6 +598,163 @@ function bulkUpdateApiKey(db, log, newKey) {
   return info.changes;
 }
 
+/** 判断 Google 模型是否匹配当前配置的服务类型（用于推荐排序与筛选） */
+function isRecommendedGeminiModel(modelId, supportedMethods, serviceType) {
+  const id = String(modelId || '').toLowerCase();
+  const methods = Array.isArray(supportedMethods)
+    ? supportedMethods.map((m) => String(m || '').toLowerCase())
+    : [];
+  const st = String(serviceType || 'text').toLowerCase();
+
+  if (!id || /embedding|aqa|bison|gecko|attribution/.test(id)) return false;
+
+  if (st === 'video') {
+    return methods.includes('predictlongrunning') || /(^|[-_/])(veo|omni)/.test(id);
+  }
+  if (st === 'image' || st === 'storyboard_image') {
+    return /(image|banana|imagen)/.test(id) && !/veo/.test(id);
+  }
+  if (st === 'tts') {
+    return /(tts|audio|speech)/.test(id);
+  }
+  // 文本/对话：支持 generateContent 且排除纯生图/视频/音乐/TTS 专用模型
+  const supportsGenerate = methods.length === 0 || methods.includes('generatecontent');
+  return supportsGenerate && !/(imagen|veo|omni|lyria|tts|image-generation|-image(-|$)|banana)/.test(id);
+}
+
+/**
+ * 从上游接口在线拉取当前 API Key 可用的模型列表（Google 原生 /v1beta/models 或 OpenAI 兼容 /models）。
+ * 所有 Google 域名请求自动遵守 googleProxyService 代理约束。
+ */
+async function fetchAvailableModels(opts = {}, db = null) {
+  registerSecret(opts.api_key);
+  const base = String(opts.base_url || '').trim().replace(/\/+$/, '');
+  if (!base) throw new Error('请先填写 Base URL');
+  if (!opts.api_key) throw new Error('请先填写 API Key');
+
+  const provider = String(opts.provider || '').trim().toLowerCase();
+  const protocol = String(opts.api_protocol || '').trim().toLowerCase();
+  const serviceType = String(opts.service_type || 'text').trim().toLowerCase();
+  const isGemini =
+    provider === 'gemini' ||
+    provider === 'google' ||
+    protocol === 'gemini' ||
+    /generativelanguage\.googleapis\.com/i.test(base);
+
+  if (isGemini) {
+    const geminiRoot = base
+      .replace(/\/v1beta\/openai$/i, '')
+      .replace(/\/v1beta$/i, '')
+      .replace(/\/+$/, '');
+    const seen = new Map();
+    let pageToken = '';
+    for (let page = 0; page < 5; page++) {
+      const qs = new URLSearchParams({ pageSize: '200' });
+      if (pageToken) qs.set('pageToken', pageToken);
+      const url = `${geminiRoot}/v1beta/models?${qs.toString()}`;
+      const res = await googleProxyService.fetchWithGoogleProxy(
+        url,
+        { method: 'GET', headers: { 'x-goog-api-key': opts.api_key } },
+        db,
+        { timeoutMs: 30000 }
+      );
+      const raw = await res.text();
+      if (!res.ok) {
+        let msg = `拉取模型列表失败: HTTP ${res.status}`;
+        try {
+          const j = JSON.parse(raw);
+          const detail = j.error?.message || j.message;
+          if (detail) msg += ' - ' + String(detail).slice(0, 200);
+        } catch (_) {
+          if (raw) msg += ' - ' + raw.slice(0, 200);
+        }
+        throw new Error(msg);
+      }
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (_) {
+        throw new Error('上游返回的模型列表不是有效的 JSON');
+      }
+      const rows = Array.isArray(data.models) ? data.models : [];
+      for (const m of rows) {
+        const rawName = String(m?.name || m?.id || '').trim();
+        const id = rawName.replace(/^models\//i, '');
+        if (!id || seen.has(id)) continue;
+        const methods = Array.isArray(m?.supportedGenerationMethods) ? m.supportedGenerationMethods : [];
+        seen.set(id, {
+          id,
+          display_name: String(m?.displayName || id),
+          recommended: isRecommendedGeminiModel(id, methods, serviceType),
+          supported_methods: methods,
+        });
+      }
+      if (!data.nextPageToken) break;
+      pageToken = String(data.nextPageToken);
+    }
+
+    const models = [...seen.values()].sort((a, b) => {
+      if (a.recommended !== b.recommended) return a.recommended ? -1 : 1;
+      return a.id.localeCompare(b.id);
+    });
+    return {
+      models,
+      total: models.length,
+      recommended_count: models.filter((m) => m.recommended).length,
+      source: 'gemini',
+    };
+  }
+
+  // OpenAI 兼容接口：GET {base}/models
+  const modelsUrl = /\/models$/i.test(base) ? base : `${base}/models`;
+  const res = await googleProxyService.fetchWithGoogleProxy(
+    modelsUrl,
+    {
+      method: 'GET',
+      headers: { Authorization: 'Bearer ' + opts.api_key },
+    },
+    db,
+    { timeoutMs: 30000 }
+  );
+  const raw = await res.text();
+  if (!res.ok) {
+    let msg = `拉取模型列表失败: HTTP ${res.status}`;
+    try {
+      const j = JSON.parse(raw);
+      const detail = j.error?.message || j.message;
+      if (detail) msg += ' - ' + String(detail).slice(0, 200);
+    } catch (_) {
+      if (raw) msg += ' - ' + raw.slice(0, 200);
+    }
+    throw new Error(msg);
+  }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (_) {
+    throw new Error('上游返回的模型列表不是有效的 JSON');
+  }
+  const items = Array.isArray(data?.data) ? data.data : (Array.isArray(data?.models) ? data.models : []);
+  const seen = new Map();
+  for (const item of items) {
+    const id = String(typeof item === 'string' ? item : (item?.id || item?.name || '')).trim();
+    if (!id || seen.has(id)) continue;
+    seen.set(id, {
+      id,
+      display_name: String(item?.displayName || item?.display_name || id),
+      recommended: true,
+      supported_methods: [],
+    });
+  }
+  const models = [...seen.values()].sort((a, b) => a.id.localeCompare(b.id));
+  return {
+    models,
+    total: models.length,
+    recommended_count: models.length,
+    source: 'openai',
+  };
+}
+
 module.exports = {
   listConfigs,
   getConfig,
@@ -594,6 +762,7 @@ module.exports = {
   updateConfig,
   deleteConfig,
   testConnection,
+  fetchAvailableModels,
   getVendorLockStatus,
   applyVendorLock,
   bulkUpdateApiKey,

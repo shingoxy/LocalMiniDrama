@@ -82,6 +82,8 @@ test('Veo download sends its key to Google and removes it on a CDN redirect', as
   let downloads = 0;
   try {
     require('../src/db/migrate').runMigrationsAndEnsure(db);
+    // 该测试用 mock global.fetch 单独验证直连重定向时的认证头剥离
+    require('../src/services/googleProxyService').saveConfig(db, { enabled: false });
     aiConfigService.createConfig(db, quiet, { name: 'test', service_type: 'video', provider: 'gemini', api_protocol: 'gemini', base_url: 'https://generativelanguage.googleapis.com', model: ['veo-3.1-generate-preview'], api_key: 'synthetic-download-secret' });
     db.prepare('INSERT INTO video_generations (drama_id, provider, model, prompt, status, created_at) VALUES (1, ?, ?, ?, ?, ?)').run('gemini', 'veo-3.1-generate-preview', 'test', 'pending', new Date().toISOString());
     configModule.loadConfig = () => ({ storage: { local_path: storage, base_url: 'http://localhost:5679/static' } });

@@ -15,6 +15,7 @@ function createApp() {
   runMigrationsAndEnsure(db);
   const { registerSecret } = require('./utils/redactSecrets');
   for (const row of db.prepare('SELECT api_key FROM ai_service_configs').all()) registerSecret(row.api_key);
+  require('./services/googleProxyService').initFromDb(db);
 
   // 厂商锁定模式：在迁移完成后同步 vendor_lock 配置
   const { applyVendorLock } = require('./services/aiConfigService');

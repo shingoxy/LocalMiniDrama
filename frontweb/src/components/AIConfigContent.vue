@@ -67,6 +67,24 @@
             </el-button>
           </div>
           <p class="default-tip">每种服务类型仅有一个默认配置：文本用于生成故事；文本生成图片用于角色/场景/道具图；分镜图片生成用于分镜图（支持参考图）；视频用于生成视频；语音合成 TTS 用于分镜配音；即梦2角色认证用于创作页 SD2 认证（网关 Token）；SD2 资产库用于官方 ModelArk 私有资产（在未配置即梦2角色认证时供 SD2 认证使用）。</p>
+          <div v-if="googleProxyStatus" class="google-proxy-bar">
+            <div class="google-proxy-bar-left">
+              <span class="google-proxy-bar-label">Google 访问代理约束：</span>
+              <el-tag v-if="googleProxyStatus.enabled && googleProxyStatus.is_configured" type="success" size="small">
+                已启用 {{ googleProxyStatus.protocol }}://{{ googleProxyStatus.host }}:{{ googleProxyStatus.port }}{{ googleProxyStatus.username ? '（已配账密）' : '' }}
+              </el-tag>
+              <el-tag v-else-if="googleProxyStatus.enabled && googleProxyStatus.has_env_fallback" type="warning" size="small">
+                未填专用代理 · 回退环境代理 {{ googleProxyStatus.env_proxy_preview }}
+              </el-tag>
+              <el-tag v-else-if="googleProxyStatus.enabled" type="danger" size="small">
+                已默认强制走代理，但尚未配置代理地址
+              </el-tag>
+              <el-tag v-else type="info" size="small">已关闭（直连）</el-tag>
+            </div>
+            <el-button link type="primary" size="small" @click="activeTab = 'googleProxy'">
+              {{ googleProxyStatus.is_configured ? '修改 Google 代理' : '去配置 Google 代理' }}
+            </el-button>
+          </div>
           <el-table
             v-loading="loading"
             :data="list"
@@ -113,6 +131,11 @@
               </template>
             </el-table-column>
           </el-table>
+        </div>
+      </el-tab-pane>
+      <el-tab-pane label="Google 代理" name="googleProxy">
+        <div class="tab-content">
+          <GoogleProxySettings @updated="onGoogleProxyUpdated" />
         </div>
       </el-tab-pane>
       <el-tab-pane label="高级设置（提示词）" name="prompts">
@@ -330,7 +353,7 @@
             <el-option label="火山引擎（豆包 Seedream / Seedance）" value="volcengine" />
             <el-option label="火山即梦 Seedance 全能（Seedance 2.5 / 2.0）" value="volcengine_omni" />
             <el-option label="通义万象 DashScope" value="dashscope" />
-            <el-option label="Google Gemini（图片 / Veo 视频）" value="gemini" />
+            <el-option label="Google Gemini（图片 / Omni Flash 视频）" value="gemini" />
             <el-option label="Sora 中转站（multipart/form-data，seconds+size）" value="sora" />
             <el-option label="Veo3 兼容（JSON，images+enhance_prompt，自动翻译英文）" value="veo3" />
             <el-option label="Vidu 视频" value="vidu" />
@@ -461,10 +484,12 @@ input_reference = (图片文件，可选)</pre>
                 </div>
               </el-collapse-item>
               <el-collapse-item name="gemini-vid">
-                <template #title><span class="ph-tag ph-tag-vid">视频</span> Google Gemini — Veo 视频</template>
+                <template #title><span class="ph-tag ph-tag-vid">视频</span> Google Gemini — Omni Flash 视频（Interactions API）</template>
                 <div class="ph-body">
-                  <b>认证：</b>URL 参数 <code>?key=API_KEY</code><br>
-                  <b>Endpoint：</b><code>POST /v1beta/models/{model}:generateVideo</code>
+                  <b>认证：</b>请求头 <code>x-goog-api-key</code>（自动走 Google 代理）<br>
+                  <b>默认模型：</b><code>gemini-omni-1.1-flash</code>（GA）/ <code>gemini-omni-1.2-flash</code>（需 AI Studio Paid Tier）<br>
+                  <b>Endpoint：</b><code>POST /v1beta/interactions</code>（支持文生、首帧、首尾帧、最多 6 张参考图、原生音频、3–15 秒、16:9 / 9:16、360p–4K）<br>
+                  <b>兼容：</b>Veo 预览版已在 AI Studio 停服；若显式填写 <code>veo-*</code> 仍走 <code>:predictLongRunning</code>。
                 </div>
               </el-collapse-item>
               <el-collapse-item name="vidu-vid">
@@ -769,11 +794,63 @@ input_reference = (图片文件，可选)</pre>
               placeholder="追加预设模型"
               clearable
               filterable
-              style="width: 220px; margin-bottom: 8px"
+              style="width: 200px"
               @change="onPresetModelSelect"
             >
               <el-option v-for="m in availableModels" :key="m" :label="m" :value="m" />
             </el-select>
+            <el-button
+              plain
+              type="primary"
+              :loading="fetchingModels"
+              @click="onFetchRemoteModels"
+            >
+              拉取在线模型
+            </el-button>
+          </div>
+          <div v-if="fetchedModels.length > 0" class="fetched-models-box">
+            <div class="fetched-models-header">
+              <span>已拉取 {{ fetchedModels.length }} 个可用模型</span>
+              <el-checkbox
+                v-if="fetchedModelsSource === 'gemini' && fetchedRecommendedCount > 0"
+                v-model="fetchedOnlyRecommended"
+                size="small"
+              >
+                仅看当前类型推荐 ({{ fetchedRecommendedCount }})
+              </el-checkbox>
+            </div>
+            <div class="fetched-models-controls">
+              <el-select
+                v-model="fetchedModelPick"
+                multiple
+                filterable
+                clearable
+                collapse-tags
+                collapse-tags-tooltip
+                placeholder="搜索并勾选要使用的模型"
+                style="flex: 1"
+              >
+                <el-option
+                  v-for="item in visibleFetchedModels"
+                  :key="item.id"
+                  :label="item.id"
+                  :value="item.id"
+                >
+                  <div class="fetched-model-option">
+                    <span>{{ item.id }}</span>
+                    <el-tag v-if="fetchedModelsSource === 'gemini' && item.recommended" type="success" size="small">推荐</el-tag>
+                  </div>
+                </el-option>
+              </el-select>
+            </div>
+            <div class="fetched-models-actions">
+              <el-button size="small" type="primary" plain :disabled="!fetchedModelPick.length" @click="applyFetchedModels('replace')">
+                替换为所选
+              </el-button>
+              <el-button size="small" plain :disabled="!fetchedModelPick.length" @click="applyFetchedModels('append')">
+                追加所选
+              </el-button>
+            </div>
           </div>
           <el-input v-model="form.modelText" type="textarea" :rows="2" placeholder="选择预设厂商后自动填入，可编辑；多个用逗号或换行分隔" />
         </el-form-item>
@@ -1106,13 +1183,25 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, MagicStick, QuestionFilled, Download, Upload, Delete, ChatDotRound, Picture, Film, VideoCamera, Key, Microphone, Folder } from '@element-plus/icons-vue'
 import { aiAPI } from '@/api/ai'
-import { generationSettingsAPI } from '@/api/prompts'
+import { generationSettingsAPI, googleProxyAPI } from '@/api/prompts'
+import GoogleProxySettings from '@/components/GoogleProxySettings.vue'
 import PromptEditor from '@/components/PromptEditor.vue'
 import SceneModelMap from '@/components/SceneModelMap.vue'
 import Sd2AssetManagement from '@/components/Sd2AssetManagement.vue'
 
 const activeTab = ref('configs')
 const importFileRef = ref(null)
+const googleProxyStatus = ref(null)
+
+function onGoogleProxyUpdated(data) {
+  googleProxyStatus.value = data
+}
+
+async function loadGoogleProxyStatus() {
+  try {
+    googleProxyStatus.value = await googleProxyAPI.get()
+  } catch (_) {}
+}
 
 // ---- 生成设置 ----
 const genConcurrencyInput = ref(3)
@@ -1204,6 +1293,88 @@ const form = ref({
   group_id: '',
 })
 const presetModelPick = ref('')
+const fetchingModels = ref(false)
+const fetchedModels = ref([])
+const fetchedModelsSource = ref('')
+const fetchedOnlyRecommended = ref(true)
+const fetchedModelPick = ref([])
+
+const fetchedRecommendedCount = computed(() => fetchedModels.value.filter((m) => m.recommended).length)
+const visibleFetchedModels = computed(() => {
+  if (fetchedModelsSource.value === 'gemini' && fetchedOnlyRecommended.value && fetchedRecommendedCount.value > 0) {
+    return fetchedModels.value.filter((m) => m.recommended)
+  }
+  return fetchedModels.value
+})
+
+function clearFetchedModels() {
+  fetchedModels.value = []
+  fetchedModelsSource.value = ''
+  fetchedModelPick.value = []
+  fetchedOnlyRecommended.value = true
+}
+
+async function onFetchRemoteModels() {
+  const baseUrl = (form.value.base_url || '').trim()
+  const apiKey = (form.value.api_key || '').trim()
+  if (!baseUrl) {
+    ElMessage.warning('请先填写 Base URL')
+    return
+  }
+  if (!apiKey && !editingId.value) {
+    ElMessage.warning('请先填写 API Key')
+    return
+  }
+  fetchingModels.value = true
+  try {
+    const res = await aiAPI.fetchModels({
+      config_id: editingId.value || undefined,
+      provider: form.value.provider,
+      api_protocol: form.value.api_protocol,
+      service_type: form.value.service_type,
+      base_url: baseUrl,
+      api_key: apiKey || undefined,
+    })
+    const items = Array.isArray(res?.models) ? res.models : []
+    fetchedModels.value = items
+    fetchedModelsSource.value = res?.source || ''
+    fetchedOnlyRecommended.value = items.some((m) => m.recommended)
+    fetchedModelPick.value = []
+    if (!items.length) {
+      ElMessage.warning('接口已连通，但未返回可用模型')
+    } else {
+      const rec = Number(res?.recommended_count || 0)
+      ElMessage.success(
+        res?.source === 'gemini' && rec > 0
+          ? `拉取成功：共 ${items.length} 个模型（当前类型推荐 ${rec} 个）`
+          : `拉取成功：共 ${items.length} 个模型`
+      )
+    }
+  } catch (e) {
+    ElMessage.error(e?.message || '拉取模型失败')
+  } finally {
+    fetchingModels.value = false
+  }
+}
+
+function applyFetchedModels(mode) {
+  const picks = fetchedModelPick.value.filter(Boolean)
+  if (!picks.length) return
+  if (mode === 'replace') {
+    form.value.modelText = picks.join('\n')
+    form.value.default_model = picks[0] || ''
+    ElMessage.success(`已替换为 ${picks.length} 个模型，默认模型已设为 ${picks[0]}`)
+  } else {
+    const existing = parseModelText(form.value.modelText)
+    const merged = [...existing, ...picks.filter((id) => !existing.includes(id))]
+    form.value.modelText = merged.join('\n')
+    if (!form.value.default_model && merged.length) {
+      form.value.default_model = merged[0]
+    }
+    ElMessage.success(`已追加模型，当前共 ${merged.length} 个`)
+  }
+  fetchedModelPick.value = []
+}
 
 const formModelList = computed(() => parseModelText(form.value.modelText))
 
@@ -1222,6 +1393,7 @@ watch(
 )
 
 function onServiceTypeChange() {
+  clearFetchedModels()
   const st = form.value.service_type || 'text'
   if (st === 'jimeng2_character_auth') {
     if (!form.value.provider || form.value.provider === CUSTOM_PROVIDER_SENTINEL) {
@@ -1343,7 +1515,7 @@ const providerConfigs = {
     // { id: 'chatfire', name: 'Chatfire', models: ['doubao-seedance-1-5-pro-251215', 'doubao-seedance-1-0-lite-i2v-250428', 'doubao-seedance-1-0-lite-t2v-250428', 'doubao-seedance-1-0-pro-250528', 'doubao-seedance-1-0-pro-fast-251015', 'sora-2', 'sora-2-pro'] },
     { id: 'minimax_h3', name: 'MiniMax H3', models: ['MiniMax-H3'] },
     { id: 'minimax', name: 'MiniMax 海螺', models: ['MiniMax-Hailuo-2.3', 'MiniMax-Hailuo-2.3-Fast', 'MiniMax-Hailuo-02'] },
-    { id: 'gemini', name: 'Google Gemini (Veo)', models: ['veo-3.1-generate-preview', 'veo-3.0-generate-preview', 'veo-3.0-fast-generate-preview'] },
+    { id: 'gemini', name: 'Google Gemini (Omni Flash 视频)', models: ['gemini-omni-1.1-flash', 'gemini-omni-1.2-flash'] },
     { id: 'dashscope', name: '通义万相', models: ['wan2.6-r2v-flash', 'wan2.6-t2v', 'wan2.2-kf2v-flash', 'wan2.6-i2v-flash', 'wanx2.1-vace-plus'] },
     {
       id: 'jimeng_ai_api',
@@ -1541,10 +1713,18 @@ const endpointPreviewInfo = computed(() => {
     } else if (proto === 'dashscope' || p === 'dashscope') {
       submitPath = '/api/v1/services/aigc/video-generation/video-synthesis'
     } else if (proto === 'gemini' || p === 'gemini') {
-      const m = form.value.default_model || '{模型名}'
+      const m = form.value.default_model || 'gemini-omni-1.1-flash'
+      if (/^veo[-_]/i.test(m)) {
+        return {
+          submit: `${base}/v1beta/models/${m}:predictLongRunning  （旧版 Veo，API Key 放 header: x-goog-api-key）`,
+          query: `${base}/v1beta/{operationName}  （operationName 由提交响应返回）`,
+          isAuto: true,
+          isGemini: true
+        }
+      }
       return {
-        submit: `${base}/v1beta/models/${m}:predictLongRunning  （API Key 放 header: x-goog-api-key）`,
-        query: `${base}/v1beta/{operationName}  （operationName 由提交响应返回）`,
+        submit: `${base}/v1beta/interactions  （Gemini Omni Flash，API Key 放 header: x-goog-api-key）`,
+        query: `${base}/v1beta/interactions/{id} 或 /v1beta/files/{fileId}  （自动处理同步与异步）`,
         isAuto: true,
         isGemini: true
       }
@@ -1631,6 +1811,7 @@ const endpointPreviewInfo = computed(() => {
 })
 
 function onProviderChange(providerId) {
+  clearFetchedModels()
   if (providerId === CUSTOM_PROVIDER_SENTINEL) {
     form.value.provider = ''
     form.value.api_protocol = ''
@@ -1769,6 +1950,7 @@ function parseModelText(text) {
 function resetForm() {
   editingId.value = null
   presetModelPick.value = ''
+  clearFetchedModels()
   form.value = {
     service_type: 'text',
     name: '',
@@ -1800,6 +1982,7 @@ function openAdd() {
 }
 
 async function openEdit(row) {
+  clearFetchedModels()
   row = await aiAPI.get(row.id)
   editingId.value = row.id
   const model = Array.isArray(row.model) ? row.model : (row.model ? [row.model] : [])
@@ -2263,6 +2446,7 @@ onMounted(() => {
   loadVendorLock()
   loadList()
   loadGenerationSettings()
+  loadGoogleProxyStatus()
 })
 </script>
 
@@ -2306,6 +2490,70 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+.google-proxy-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+  font-size: 12.5px;
+}
+.google-proxy-bar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.google-proxy-bar-label {
+  font-weight: 600;
+  color: var(--el-text-color-regular);
+}
+.model-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.fetched-models-box {
+  width: 100%;
+  padding: 10px 12px;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  background: var(--el-fill-color-light);
+  border: 1px solid var(--el-border-color-lighter);
+}
+.fetched-models-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+}
+.fetched-models-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+.fetched-models-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+.fetched-model-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 /* 过渡动画 */

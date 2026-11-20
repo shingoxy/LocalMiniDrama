@@ -96,6 +96,7 @@ function setupRouter(cfg, db, log) {
   r.get('/ai-configs', aiConfig.list);
   r.post('/ai-configs', aiConfig.create);
   r.post('/ai-configs/test', aiConfig.testConnection);
+  r.post('/ai-configs/fetch-models', aiConfig.fetchModels);
   r.post('/ai-configs/presets/western-short-drama', aiConfig.applyWesternPreset);
   r.post('/ai-configs/jimeng2-list-assets', aiConfig.listJimeng2MaterialAssets);
   r.post('/ai-configs/model-ark-asset', aiConfig.modelArkAsset);
@@ -307,6 +308,9 @@ function setupRouter(cfg, db, log) {
   r.put('/settings/language', settings.updateLanguage);
   r.get('/settings/generation', settings.getGenerationSettings);
   r.put('/settings/generation', settings.updateGenerationSettings);
+  r.get('/settings/google-proxy', settings.getGoogleProxy);
+  r.put('/settings/google-proxy', settings.updateGoogleProxy);
+  r.post('/settings/google-proxy/test', settings.testGoogleProxy);
 
   // ---------- prompt overrides ----------
   r.get('/settings/prompts', promptOverrides.list);

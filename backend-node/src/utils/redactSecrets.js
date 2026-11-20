@@ -12,8 +12,9 @@ function redactSecrets(value) {
   }
   return text
     .replace(/([?&](?:key|api_key|token|access_token)=)[^\s&"']+/gi, '$1[REDACTED]')
-    .replace(/("(?:api_key|apiKey|secret_key|kling_secret_key|authorization|x-goog-api-key)"\s*:\s*")[^"]*/gi, '$1[REDACTED]')
-    .replace(/\b(Bearer|Token)\s+[A-Za-z0-9._~+\/-]+/g, '$1 [REDACTED]');
+    .replace(/("(?:api_key|apiKey|secret_key|kling_secret_key|authorization|proxy-authorization|x-goog-api-key|password|proxy_password)"\s*:\s*")[^"]*/gi, '$1[REDACTED]')
+    .replace(/\b(Bearer|Token|Basic)\s+[A-Za-z0-9._~+\/=-]+/g, '$1 [REDACTED]')
+    .replace(/(https?:\/\/[^/\s:@]+:)[^@\s/]+@/gi, '$1[REDACTED]@');
 }
 
 module.exports = { registerSecret, redactSecrets };

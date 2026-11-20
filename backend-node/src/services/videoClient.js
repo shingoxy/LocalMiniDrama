@@ -6,6 +6,7 @@ let sharp; try { sharp = require('sharp'); } catch (_) { sharp = null; }
 const { uploadLocalImageToProxy, uploadToImageProxy } = require('./uploadService');
 const imageClient = require('./imageClient');
 const { applyTrustedArkImages, logSeedanceImageSources } = require('./arkImageSource');
+const googleProxyService = require('./googleProxyService');
 const {
   clampToGeminiImageAspectRatio,
   clampToViduAspectRatio,
@@ -1741,16 +1742,316 @@ async function callDashScopeVideoApi(config, log, opts) {
   return { error: '??? task_id ? video_url' };
 }
 
+/** 判断是否使用 Google Gemini Omni Flash（Interactions API）；仅显式 veo-* 模型沿用旧 Veo 通道 */
+function isGeminiOmniVideoModel(modelName) {
+  const m = String(modelName || '').trim().toLowerCase();
+  if (!m) return true;
+  return !/^veo[-_]/.test(m);
+}
+
+function normalizeGeminiOmniAspectRatio(aspectRatio) {
+  const r = String(aspectRatio || '').trim().replace(/\s+/g, '');
+  if (r === '9:16' || r === '3:4' || r === '2:3' || r === '4:5') return '9:16';
+  return '16:9';
+}
+
+function normalizeGeminiOmniDuration(duration, hasFirstAndLast = false) {
+  const maxSec = hasFirstAndLast ? 10 : 15;
+  const n = Number(duration);
+  const safe = Number.isFinite(n) && n > 0 ? Math.round(n) : 5;
+  return `${Math.min(maxSec, Math.max(3, safe))}s`;
+}
+
+function normalizeGeminiOmniResolution(resolution) {
+  const r = String(resolution || '').trim().toLowerCase();
+  if (['360p', '720p', '1080p', '4k'].includes(r)) return r;
+  return '720p';
+}
+
+function extractGeminiFileIdFromUri(uri) {
+  const m = String(uri || '').match(/files\/([a-zA-Z0-9._-]+)/);
+  return m ? m[1] : null;
+}
+
+function normalizeGeminiOmniDownloadUrl(base, rawUri) {
+  const uri = String(rawUri || '').trim();
+  if (!uri) return null;
+  const cleanBase = String(base || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
+  const fileId = extractGeminiFileIdFromUri(uri);
+  if (fileId) {
+    if (uri.startsWith('http') && /:download\b/i.test(uri)) return uri;
+    return `${cleanBase}/v1beta/files/${encodeURIComponent(fileId)}:download?alt=media`;
+  }
+  if (/^https?:\/\//i.test(uri)) return uri;
+  return `${cleanBase}/${uri.replace(/^\/+/, '')}`;
+}
+
+/** 从 Interactions API 响应中提取生成的视频（兼容 output_video / steps / outputs 及 uri / inline data） */
+function extractGeminiOmniVideoOutput(data, base) {
+  if (!data || typeof data !== 'object') return null;
+  const candidates = [];
+  if (data.output_video && typeof data.output_video === 'object') {
+    candidates.push(data.output_video);
+  }
+  if (Array.isArray(data.steps)) {
+    for (const step of data.steps) {
+      if (!Array.isArray(step?.content)) continue;
+      for (const part of step.content) {
+        if (part && (part.type === 'video' || String(part.mime_type || '').startsWith('video/'))) {
+          candidates.push(part);
+        }
+      }
+    }
+  }
+  if (Array.isArray(data.outputs)) {
+    for (const part of data.outputs) {
+      if (part && (part.type === 'video' || String(part.mime_type || '').startsWith('video/'))) {
+        candidates.push(part);
+      }
+    }
+  }
+  for (const part of candidates) {
+    if (part.uri) {
+      return {
+        uri: normalizeGeminiOmniDownloadUrl(base, part.uri),
+        fileId: extractGeminiFileIdFromUri(part.uri),
+      };
+    }
+    if (part.data) {
+      const mime = part.mime_type || part.mimeType || 'video/mp4';
+      return {
+        dataUrl: `data:${mime};base64,${String(part.data).replace(/\s+/g, '')}`,
+      };
+    }
+  }
+  return null;
+}
+
+/** 读取本地/远程参考图为 Gemini Omni Flash Interactions API 的 inline image 输入对象 */
+async function loadImageAsOmniBase64Part(rawUrl, files_base_url, storage_local_path, db) {
+  const imgUrl = String(rawUrl || '').trim();
+  if (!imgUrl) return null;
+  if (imgUrl.startsWith('data:')) {
+    const m = imgUrl.match(/^data:([\w/+.-]+);base64,(.+)$/);
+    if (m) return { type: 'image', data: m[2], mime_type: m[1] };
+    return null;
+  }
+  if (storage_local_path) {
+    const baseUrl = (files_base_url || '').replace(/\/$/, '');
+    let relPath = null;
+    if (/localhost|127\.0\.0\.1/i.test(imgUrl) || !/^https?:\/\//i.test(imgUrl)) {
+      const afterStatic = imgUrl.split('/static/')[1]
+        || (baseUrl && imgUrl.startsWith(baseUrl) ? imgUrl.slice(baseUrl.length) : imgUrl);
+      relPath = String(afterStatic || '').split(/[?#]/)[0].replace(/^\/+/, '');
+    }
+    if (relPath) {
+      const filePath = path.isAbsolute(relPath) ? relPath : path.join(storage_local_path, relPath);
+      try {
+        if (fs.existsSync(filePath)) {
+          const buf = fs.readFileSync(filePath);
+          const ext = path.extname(filePath).toLowerCase();
+          const mime_type = { '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp' }[ext] || 'image/jpeg';
+          return { type: 'image', data: buf.toString('base64'), mime_type };
+        }
+      } catch (_) {}
+    }
+  }
+  if (/^https?:\/\//i.test(imgUrl)) {
+    try {
+      const imgRes = await googleProxyService.fetchWithGoogleProxy(imgUrl, { method: 'GET' }, db, { timeoutMs: 60000 });
+      if (imgRes.ok) {
+        const buf = Buffer.from(await imgRes.arrayBuffer());
+        const ct = imgRes.headers.get('content-type') || 'image/jpeg';
+        return { type: 'image', data: buf.toString('base64'), mime_type: ct.split(';')[0].trim() };
+      }
+    } catch (_) {}
+  }
+  return null;
+}
+
 /**
- * ?? Google Gemini Veo ???? API?predictLongRunning ??????
- * ?????veo-3.1-generate-preview / veo-3.0-generate-preview / veo-3.0-fast-generate-preview
- * ?? t2v?????? i2v???????
+ * 调用 Google Gemini Omni Flash 视频生成 API（Interactions API: POST /v1beta/interactions）
+ * 支持模型：gemini-omni-1.1-flash（GA 默认）/ gemini-omni-1.2-flash
+ * 支持文生视频、首帧图生、首尾帧过渡（3–10s）及多参考图 R2V（最多 6 张，3–15s），带原生音频。
  */
-async function callGeminiVideoApi(config, log, opts) {
-  const { prompt, duration, aspect_ratio, image_url, video_gen_id, files_base_url, storage_local_path, model } = opts;
+async function callGeminiOmniVideoApi(config, log, opts, db = null) {
+  const {
+    prompt,
+    duration,
+    aspect_ratio,
+    resolution,
+    image_url,
+    first_frame_url,
+    last_frame_url,
+    reference_urls,
+    video_gen_id,
+    files_base_url,
+    storage_local_path,
+    model,
+  } = opts;
+
   const apiKey = config.api_key || '';
   const base = (config.base_url || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
-  const modelName = model || 'veo-3.0-generate-preview';
+  const modelName = model || 'gemini-omni-1.1-flash';
+
+  const firstRaw = String(first_frame_url || image_url || '').trim();
+  const lastRaw = String(last_frame_url || '').trim();
+  if (lastRaw && !firstRaw) {
+    return { error: 'Gemini Omni Flash 首尾帧模式需要同时提供首帧' };
+  }
+  const refList = Array.isArray(reference_urls) ? reference_urls.filter(Boolean).slice(0, 6) : [];
+  const hasFirstAndLast = Boolean(firstRaw && lastRaw);
+
+  const inputParts = [];
+  if (refList.length > 0 && !hasFirstAndLast) {
+    for (const ref of refList) {
+      const part = await loadImageAsOmniBase64Part(ref, files_base_url, storage_local_path, db);
+      if (part) inputParts.push(part);
+    }
+  } else {
+    if (firstRaw) {
+      const p1 = await loadImageAsOmniBase64Part(firstRaw, files_base_url, storage_local_path, db);
+      if (p1) inputParts.push(p1);
+    }
+    if (lastRaw) {
+      const p2 = await loadImageAsOmniBase64Part(lastRaw, files_base_url, storage_local_path, db);
+      if (p2) inputParts.push(p2);
+    }
+  }
+
+  let promptText = String(prompt || '').trim();
+  const appendHint = (text, hint) => {
+    if (!text) return hint;
+    return `${text}${/[.!?。！？]$/.test(text) ? '' : '.'} ${hint}`;
+  };
+  if (hasFirstAndLast && inputParts.length >= 2) {
+    if (!/starting frame|first frame|首帧/i.test(promptText)) {
+      promptText = appendHint(promptText, 'Use the first image as the starting frame and the second image as the final frame.');
+    }
+  } else if (firstRaw && !refList.length && inputParts.length >= 1) {
+    if (!/starting frame|first frame|首帧/i.test(promptText)) {
+      promptText = appendHint(promptText, 'Use this image as the starting frame.');
+    }
+  }
+
+  const ratio = normalizeGeminiOmniAspectRatio(aspect_ratio);
+  const durationStr = normalizeGeminiOmniDuration(duration, hasFirstAndLast);
+  const resStr = normalizeGeminiOmniResolution(resolution);
+
+  const body = {
+    model: modelName,
+    input: inputParts.length > 0 ? [...inputParts, { type: 'text', text: promptText }] : promptText,
+    response_format: {
+      type: 'video',
+      aspect_ratio: ratio,
+      duration: durationStr,
+      resolution: resStr,
+      delivery: 'uri',
+    },
+  };
+
+  const url = `${base}/v1beta/interactions`;
+  log.info('Gemini Omni Flash Video API request', {
+    model: modelName,
+    aspect_ratio: ratio,
+    duration: durationStr,
+    resolution: resStr,
+    image_count: inputParts.length,
+    video_gen_id,
+  });
+
+  const res = await googleProxyService.fetchWithGoogleProxy(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify(body),
+    },
+    db,
+    { timeoutMs: 600000 }
+  );
+  const raw = await res.text();
+  if (!res.ok) {
+    let errMsg = 'Gemini Omni Flash 视频生成失败: ' + res.status;
+    try {
+      const errJson = JSON.parse(raw);
+      const msg = errJson.error?.message || errJson.message;
+      if (msg) errMsg += ' - ' + String(msg).slice(0, 300);
+    } catch (_) {
+      if (raw) errMsg += ' - ' + raw.slice(0, 200);
+    }
+    log.error('Gemini Omni Flash Video API failed', { status: res.status, body: raw.slice(0, 300), video_gen_id });
+    return { error: errMsg };
+  }
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch (_) {
+    return { error: 'Gemini Omni Flash 返回非 JSON 格式响应' };
+  }
+
+  if (data.error) {
+    return { error: data.error.message || JSON.stringify(data.error).slice(0, 300) };
+  }
+
+  const status = String(data.status || '').toLowerCase();
+  if ((status === 'in_progress' || status === 'queued' || status === 'pending') && data.id) {
+    log.info('Gemini Omni Flash interaction queued', { interaction_id: data.id, status, video_gen_id });
+    return { task_id: `interaction:${data.id}`, status: 'processing' };
+  }
+  if (status === 'failed' || status === 'cancelled') {
+    return { error: data.error?.message || `Gemini Omni Flash 任务状态异常: ${status}` };
+  }
+
+  const extracted = extractGeminiOmniVideoOutput(data, base);
+  if (extracted?.uri) {
+    if (extracted.fileId) {
+      try {
+        const fileRes = await googleProxyService.fetchWithGoogleProxy(
+          `${base}/v1beta/files/${encodeURIComponent(extracted.fileId)}`,
+          { method: 'GET', headers: { 'x-goog-api-key': apiKey } },
+          db,
+          { timeoutMs: 30000 }
+        );
+        if (fileRes.ok) {
+          const fileMeta = await fileRes.json().catch(() => ({}));
+          if (fileMeta.state === 'PROCESSING') {
+            return { task_id: `omni_file:${extracted.fileId}`, status: 'processing' };
+          }
+          if (fileMeta.state === 'FAILED') {
+            return { error: fileMeta.error?.message || 'Gemini Omni Flash 视频文件处理失败' };
+          }
+        }
+      } catch (_) {}
+    }
+    return { video_url: extracted.uri };
+  }
+  if (extracted?.dataUrl) {
+    return { video_url: extracted.dataUrl };
+  }
+  if (data.id) {
+    return { task_id: `interaction:${data.id}`, status: 'processing' };
+  }
+  return { error: 'Gemini Omni Flash 响应中未包含视频内容，请确认账号已开通 Paid Tier 与模型权限' };
+}
+
+/**
+ * 调用 Google Gemini 视频生成 API：
+ * - Gemini Omni Flash（默认 gemini-omni-1.1-flash / gemini-omni-1.2-flash）走 Interactions API（/v1beta/interactions）
+ * - 显式指定 veo-* 时保留旧版 predictLongRunning 通道（兼容中转/旧测试）
+ */
+async function callGeminiVideoApi(config, log, opts, db = null) {
+  const { prompt, duration, aspect_ratio, image_url, video_gen_id, files_base_url, storage_local_path, model } = opts;
+  const modelName = model || 'gemini-omni-1.1-flash';
+  if (isGeminiOmniVideoModel(modelName)) {
+    return callGeminiOmniVideoApi(config, log, { ...opts, model: modelName }, db);
+  }
+  const apiKey = config.api_key || '';
+  const base = (config.base_url || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
 
   // durationSeconds ??? 5-8 ?
   const durationSec = Math.min(8, Math.max(5, Math.round(Number(duration) || 8)));
@@ -1820,14 +2121,18 @@ async function callGeminiVideoApi(config, log, opts) {
     has_image: !!instance.image,
   });
 
-  const res = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': apiKey,
+  const res = await googleProxyService.fetchWithGoogleProxy(
+    url,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
+    db
+  );
   const raw = await res.text();
   if (!res.ok) {
     let errMsg = 'Gemini ????????: ' + res.status;
@@ -3987,11 +4292,15 @@ async function callVideoApi(db, log, opts) {
       prompt, model,
       duration: opts.duration,
       aspect_ratio,
+      resolution: opts.resolution,
       image_url: opts.image_url,
+      first_frame_url: opts.first_frame_url,
+      last_frame_url: opts.last_frame_url,
+      reference_urls: opts.reference_urls,
       video_gen_id: opts.video_gen_id,
       files_base_url: opts.files_base_url,
       storage_local_path: opts.storage_local_path,
-    });
+    }, db);
   }
 
   if (protocol === 'vidu') {
@@ -4365,7 +4674,13 @@ async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 
           : {};
       } else if (isGemini) {
         const base = (config.base_url || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
-        url = `${base}/v1beta/${taskId}`;
+        if (String(taskId).startsWith('interaction:')) {
+          url = `${base}/v1beta/interactions/${encodeURIComponent(String(taskId).slice('interaction:'.length))}`;
+        } else if (String(taskId).startsWith('omni_file:')) {
+          url = `${base}/v1beta/files/${encodeURIComponent(String(taskId).slice('omni_file:'.length))}`;
+        } else {
+          url = `${base}/v1beta/${taskId}`;
+        }
         headers = { 'x-goog-api-key': config.api_key || '' };
       } else if (isVidu) {
         const viduBase = (config.base_url || 'https://api.vidu.cn').replace(/\/$/, '');
@@ -4382,7 +4697,7 @@ async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 
       }
       const pollRound = attempt + 1;
       log.info('[poll] 发起查询', { video_gen_id: videoGenId, round: pollRound, url });
-      const res = await fetch(url, { method: 'GET', headers });
+      const res = await googleProxyService.fetchWithGoogleProxy(url, { method: 'GET', headers }, db);
       const raw = await res.text();
       const bodyLogged =
         pollLogBodyMax === Infinity
@@ -4609,13 +4924,37 @@ async function pollVideoTask(db, log, videoGenId, taskId, config, maxAttempts = 
       }
 
       if (isGemini) {
+        const base = (config.base_url || 'https://generativelanguage.googleapis.com').replace(/\/$/, '');
         if (data.error) {
-          return { error: data.error.message || 'Gemini ??????' };
+          return { error: data.error.message || 'Gemini 视频生成失败' };
+        }
+        if (String(taskId).startsWith('interaction:')) {
+          const st = String(data.status || '').toLowerCase();
+          if (st === 'failed' || st === 'cancelled') {
+            return { error: data.error?.message || `Gemini Omni Flash 任务失败 (${st})` };
+          }
+          if (st === 'completed') {
+            const extracted = extractGeminiOmniVideoOutput(data, base);
+            if (extracted?.uri) return { video_url: extracted.uri };
+            if (extracted?.dataUrl) return { video_url: extracted.dataUrl };
+            return { error: 'Gemini Omni Flash 任务完成但未返回视频内容' };
+          }
+          continue;
+        }
+        if (String(taskId).startsWith('omni_file:')) {
+          if (data.state === 'FAILED') {
+            return { error: data.error?.message || 'Gemini Omni Flash 视频文件处理失败' };
+          }
+          if (data.state === 'ACTIVE') {
+            const fid = String(taskId).slice('omni_file:'.length);
+            return { video_url: `${base}/v1beta/files/${encodeURIComponent(fid)}:download?alt=media` };
+          }
+          continue;
         }
         if (data.done === true) {
           const videoUri = data.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
           if (videoUri) return { video_url: videoUri };
-          return { error: 'Gemini ??????????????' };
+          return { error: 'Gemini 视频任务完成但未返回视频地址' };
         }
         continue;
       }

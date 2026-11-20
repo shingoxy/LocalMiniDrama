@@ -120,11 +120,35 @@ function testConnection(db, log) {
         endpoint: body.endpoint,
         service_type: body.service_type,
         settings: body.settings,
-      });
+      }, db);
       response.success(res, { message: '连接测试成功' });
     } catch (err) {
       log.error('AI config test connection failed', { error: err.message });
       response.badRequest(res, '连接测试失败: ' + (err.message || '未知错误'));
+    }
+  };
+}
+
+function fetchModels(db, log) {
+  return async (req, res) => {
+    const saved = req.body?.config_id ? aiConfigService.getConfig(db, Number(req.body.config_id)) : null;
+    const body = { ...saved, ...req.body };
+    if (!body.api_key && saved) body.api_key = saved.api_key;
+    if (!body.base_url || !body.api_key) {
+      return response.badRequest(res, '缺少 base_url 或 api_key');
+    }
+    try {
+      const result = await aiConfigService.fetchAvailableModels({
+        base_url: body.base_url,
+        api_key: body.api_key,
+        provider: body.provider,
+        api_protocol: body.api_protocol,
+        service_type: body.service_type,
+      }, db);
+      response.success(res, result);
+    } catch (err) {
+      log.error('AI config fetch models failed', { error: err.message });
+      response.badRequest(res, err.message || '拉取模型列表失败');
     }
   };
 }
@@ -202,6 +226,7 @@ module.exports = function aiConfigRoutes(db, log, cfg) {
     update: update(db, log, cfg),
     delete: remove(db, log, cfg),
     testConnection: testConnection(db, log),
+    fetchModels: fetchModels(db, log),
     listJimeng2MaterialAssets: listJimeng2MaterialAssets(log),
     modelArkAsset: modelArkAsset(log),
     bulkUpdateKey: bulkUpdateKey(db, log, cfg),

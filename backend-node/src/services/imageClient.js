@@ -1380,6 +1380,7 @@ async function callGeminiImageApi(db, config, log, opts) {
       { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
       body,
       IMAGE_HTTP_TIMEOUT_MS,
+      db,
     );
     geminiStatus = out.statusCode;
     raw = out.raw;

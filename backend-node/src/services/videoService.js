@@ -1,6 +1,6 @@
-/** 轮询/同步返回的 video_url 须为 http(s)，避免中转 FAILURE 时 result_url 为错误文案 */
+/** 轮询/同步返回的 video_url 须为 http(s) 或内联 data:video/...，避免中转 FAILURE 时 result_url 为错误文案 */
 function resolveRemoteVideoUrl(videoUrl, fallbackError) {
-  if (videoUrl && videoClient.isPlausibleHttpVideoUrl(videoUrl)) {
+  if (videoUrl && (videoClient.isPlausibleHttpVideoUrl(videoUrl) || /^data:video\/[\w.+-]+;base64,/i.test(String(videoUrl).trim()))) {
     return { ok: true, video_url: String(videoUrl).trim() };
   }
   if (videoUrl) {
@@ -94,6 +94,7 @@ const { randomUUID } = require('crypto');
 const videoClient = require('./videoClient');
 const taskService = require('./taskService');
 const storageLayout = require('./storageLayout');
+const googleProxyService = require('./googleProxyService');
 const { getFfmpegPath, hasLocalFfmpeg } = require('../utils/ffmpegPath');
 
 /** @returns {{ dir: string, relPrefix: string }} 与图片 uploads 一致的工程子目录规则 */
@@ -110,11 +111,23 @@ function resolveVideosDir(storagePath, projectSubdir) {
  * 将远程 video_url 下载到本地
  * @returns {string|null} 相对 storage 根的路径，如 projects/.../videos/vg_1_xxx.mp4；无工程时为 videos/...
  */
-async function downloadVideoToLocal(storagePath, videoUrl, videoGenId, log, projectSubdir = null, config = {}) {
+async function downloadVideoToLocal(storagePath, videoUrl, videoGenId, log, projectSubdir = null, config = {}, db = null) {
   if (!videoUrl || typeof videoUrl !== 'string') return null;
   const { dir, relPrefix } = resolveVideosDir(storagePath, projectSubdir);
   try {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+    // 兼容 Gemini Interactions API 返回的 inline base64 视频
+    const dataMatch = String(videoUrl).trim().match(/^data:video\/([\w.+-]+);base64,([\s\S]+)$/i);
+    if (dataMatch) {
+      const sub = dataMatch[1].toLowerCase();
+      const ext = sub.includes('webm') ? 'webm' : sub.includes('quicktime') ? 'mov' : 'mp4';
+      const name = `vg_${videoGenId}_${randomUUID().slice(0, 8)}.${ext}`;
+      const filePath = path.join(dir, name);
+      fs.writeFileSync(filePath, Buffer.from(dataMatch[2].replace(/\s+/g, ''), 'base64'));
+      const relativePath = `${relPrefix}/${name}`.replace(/\\/g, '/');
+      log.info('Inline base64 video saved to local', { videoGenId, local_path: relativePath, projectSubdir: projectSubdir || '(root)' });
+      return relativePath;
+    }
     const ext = (videoUrl.split('?')[0].match(/\.(mp4|webm|mov)$/i) || [])[1] || 'mp4';
     const name = `vg_${videoGenId}_${randomUUID().slice(0, 8)}.${ext}`;
     const filePath = path.join(dir, name);
@@ -124,7 +137,12 @@ async function downloadVideoToLocal(storagePath, videoUrl, videoGenId, log, proj
       // Official Veo downloads require authentication; never forward it to a CDN/other host.
       const headers = target.origin === 'https://generativelanguage.googleapis.com' && config.api_key
         ? { 'x-goog-api-key': config.api_key } : {};
-      res = await fetch(target, { method: 'GET', headers, redirect: 'manual' });
+      res = await googleProxyService.fetchWithGoogleProxy(
+        target.toString(),
+        { method: 'GET', headers, redirect: 'manual' },
+        db,
+        { timeoutMs: 300000 }
+      );
       if (res.status < 300 || res.status >= 400 || !res.headers.get('location')) break;
       await res.arrayBuffer();
       target = new URL(res.headers.get('location'), target);
@@ -241,41 +259,45 @@ async function finalizeSuccessfulVideo(db, log, videoGenId, row, rowForAspect, v
     const cfg = require('../config').loadConfig();
     const storagePath = resolveStoragePath(cfg);
     const projectSubdir = storageLayout.getProjectStorageSubdir(db, row.drama_id);
-    localPath = await downloadVideoToLocal(storagePath, videoUrl, videoGenId, log, projectSubdir, config);
+    localPath = await downloadVideoToLocal(storagePath, videoUrl, videoGenId, log, projectSubdir, config, db);
     maybeNormalizeVideoAfterDownload(storagePath, localPath, rowForAspect, videoGenId, log);
   } catch (_) {}
+  // 内联 data:video/... 落地后改为本地静态路径，避免大段 base64 写入数据库
+  const storedVideoUrl = /^data:video\//i.test(String(videoUrl || '')) && localPath
+    ? '/static/' + localPath
+    : videoUrl;
   try {
     db.prepare(
       'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, completed_at = ?, updated_at = ? WHERE id = ?'
-    ).run('completed', videoUrl, localPath, now, now, videoGenId);
+    ).run('completed', storedVideoUrl, localPath, now, now, videoGenId);
   } catch (e) {
     if ((e.message || '').includes('completed_at')) {
       db.prepare(
         'UPDATE video_generations SET status = ?, video_url = ?, local_path = ?, updated_at = ? WHERE id = ?'
-      ).run('completed', videoUrl, localPath, now, videoGenId);
+      ).run('completed', storedVideoUrl, localPath, now, videoGenId);
     } else throw e;
   }
   if (row.storyboard_id) {
     try {
       db.prepare('UPDATE storyboards SET video_url = ?, local_path = ?, updated_at = ? WHERE id = ?').run(
-        videoUrl, localPath, now, row.storyboard_id
+        storedVideoUrl, localPath, now, row.storyboard_id
       );
       log.info('Updated storyboard video' + (logLabel ? ` (${logLabel})` : ''), {
         storyboard_id: row.storyboard_id,
-        video_url: videoUrl,
+        video_url: storedVideoUrl,
       });
     } catch (_) {}
   }
   if (row.task_id) {
     taskService.updateTaskResult(db, row.task_id, {
       video_generation_id: videoGenId,
-      video_url: videoUrl,
+      video_url: storedVideoUrl,
       status: 'completed',
     });
   }
   log.info('Video generation completed' + (logLabel ? ` (${logLabel})` : ''), {
     id: videoGenId,
-    video_url: videoUrl,
+    video_url: storedVideoUrl,
     local_path: localPath,
   });
 }

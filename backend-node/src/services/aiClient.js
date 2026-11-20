@@ -1,6 +1,7 @@
 // 与 Go pkg/ai + application/services/ai_service 对齐：读取 ai_service_configs，调用 OpenAI 兼容的 chat completions
 const aiConfigService = require('./aiConfigService');
 const { applyDeepSeekChatOptions } = require('./deepseekConfig');
+const googleProxyService = require('./googleProxyService');
 const https = require('https');
 const http = require('http');
 
@@ -8,10 +9,11 @@ const http = require('http');
  * 非流式 POST，发送 JSON body，等待完整 HTTP 响应后返回。
  * 用于视觉分析等短请求，兼容 o-series 推理模型和各种第三方代理。
  */
-function postJSONNonStream(url, headers, body, timeoutMs = 120000) {
+function postJSONNonStream(url, headers, body, timeoutMs = 120000, db = null) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const mod = parsed.protocol === 'https:' ? https : http;
+    const proxyAgent = googleProxyService.getAgentForUrl(url, db);
     const bodyStr = JSON.stringify(body);
     const reqHeaders = {
       'Content-Type': 'application/json',
@@ -26,6 +28,7 @@ function postJSONNonStream(url, headers, body, timeoutMs = 120000) {
       headers: reqHeaders,
       // 避免 Windows/Electron 优先连不可达的 IPv6（Cloudflare）导致 ETIMEDOUT
       family: 4,
+      ...(proxyAgent ? { agent: proxyAgent } : {}),
     };
 
     const req = mod.request(options, (res) => {
@@ -63,10 +66,11 @@ function postJSONNonStream(url, headers, body, timeoutMs = 120000) {
  * 避免 undici fetch 在慢链路或大包体（多参考图 base64）下长时间挂起后以模糊的 fetch failed 结束。
  * @returns {Promise<{ statusCode: number, raw: string }>}
  */
-function postJSONWithTimeout(url, headers, body, timeoutMs = 600000) {
+function postJSONWithTimeout(url, headers, body, timeoutMs = 600000, db = null) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const mod = parsed.protocol === 'https:' ? https : http;
+    const proxyAgent = googleProxyService.getAgentForUrl(url, db);
     const bodyStr = typeof body === 'string' ? body : JSON.stringify(body);
     const reqHeaders = {
       'Content-Type': 'application/json',
@@ -81,6 +85,7 @@ function postJSONWithTimeout(url, headers, body, timeoutMs = 600000) {
       headers: reqHeaders,
       // 避免 Windows/Electron 优先连不可达的 IPv6（Cloudflare）导致 ETIMEDOUT
       family: 4,
+      ...(proxyAgent ? { agent: proxyAgent } : {}),
     };
 
     const req = mod.request(options, (res) => {
@@ -116,10 +121,11 @@ function postJSONWithTimeout(url, headers, body, timeoutMs = 600000) {
  * 彻底解决分镜等长耗时任务的 "fetch failed / timeout" 问题。
  * silenceTimeoutMs：连续多少毫秒无任何数据才判定超时（默认 60 秒）。
  */
-function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress = null) {
+function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress = null, db = null) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(url);
     const mod = parsed.protocol === 'https:' ? https : http;
+    const proxyAgent = googleProxyService.getAgentForUrl(url, db);
     // 强制开启流式输出
     const streamBody = { ...body, stream: true };
     const bodyStr = JSON.stringify(streamBody);
@@ -136,6 +142,7 @@ function postJSONStream(url, headers, body, silenceTimeoutMs = 60000, onProgress
       headers: reqHeaders,
       // 避免 Windows/Electron 优先连不可达的 IPv6（Cloudflare）导致 ETIMEDOUT
       family: 4,
+      ...(proxyAgent ? { agent: proxyAgent } : {}),
     };
 
     let silenceTimer = null;
@@ -356,7 +363,7 @@ async function generateText(db, log, serviceType, userPrompt, systemPrompt, opti
     }
     // 调用者提供的流式回调（如分镜增量解析），传入当前已积累的完整文本
     if (streamCallback && accumulated) streamCallback(accumulated);
-  });
+  }, db);
   // 流式模式下 res.body 已是拼接好的完整文本内容（非 JSON）
   const content = res.body;
   const elapsedMs = Date.now() - startMs;
@@ -464,7 +471,8 @@ async function streamGenerateText(db, log, serviceType, userPrompt, systemPrompt
       const delta = accumulated.slice(lastLen);
       lastLen = accumulated.length;
       if (onDelta && delta) onDelta(delta);
-    }
+    },
+    db
   );
   const content = res.body;
   if (!content) {
@@ -602,7 +610,7 @@ async function generateTextWithVision(db, log, serviceType, userPrompt, systemPr
   let res;
   try {
     // 使用非流式请求：视觉分析响应短，且流式对推理模型（o1/o3/o4）和部分代理兼容性差
-    res = await postJSONNonStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 120000);
+    res = await postJSONNonStream(url, { Authorization: 'Bearer ' + (config.api_key || '') }, body, 120000, db);
   } catch (httpErr) {
     log.error('[Vision] HTTP 请求失败', { model, url: url.slice(0, 80), error: httpErr.message });
     throw httpErr;

@@ -20,3 +20,15 @@ export const generationSettingsAPI = {
     return request.put('/settings/generation', data)
   },
 }
+
+export const googleProxyAPI = {
+  get() {
+    return request.get('/settings/google-proxy')
+  },
+  update(data) {
+    return request.put('/settings/google-proxy', data)
+  },
+  test(data) {
+    return request.post('/settings/google-proxy/test', data)
+  },
+}
