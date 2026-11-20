@@ -19,7 +19,7 @@
 | 剧本与项目 | 项目、剧集管理，剧本生成与编辑，角色、场景、道具提取；新项目默认中文分镜，成片语言随提示词 |
 | 视觉资产 | 角色图、场景图、道具图、分镜图、参考帧、素材库 |
 | Storyboard | 列表与画布，经典分镜与全能分镜，提示词编辑、批量生成 |
-| AI Provider | 沿用现有文本、图片、视频接口；包括 DeepSeek、Seedream、Seedance、Kling 等配置与协议 |
+| AI Provider | 沿用现有文本、图片、视频接口；支持 DeepSeek、Seedream、Seedance、Kling、Google Gemini（含默认代理约束、在线拉取模型与 Omni Flash 视频）等配置与协议 |
 | 混合视频 | 每个 Shot 单独选模型，项目默认、整集与多选批量设置，按 Shot 路由生成 |
 | 本地 H3 | 默认 LightX2V 四步加速，直接连接现有 ComfyUI，首帧 / 首尾帧输入，Queue / Progress / History / Cancel，长任务跟踪与 MP4 自动预览 |
 | 本地图片 | 可选 Qwen-Image 2.1，人物、场景、道具、首尾帧候选，历史、自动预览、选用与任务恢复；[使用说明](docs/local-images.md) |
@@ -101,6 +101,12 @@ Backend 启动时自动应用 migration。更新前备份 SQLite、素材与私�
 - 视频下拉框自动列出启用的视频配置中的模型，例如 Seedance 2.0 Fast、Seedance 2.5、Kling 与其他现有模型。
 - Local MiniMax H3 固定作为本地选项，不要求创建云视频 API Key。
 - 具体云协议仍由现有 Provider 实现处理，配置说明见 [AI 配置指南](docs/configuration.md)。该指南中的账户信息以 Provider 当前说明为准。
+
+### Google AI Studio / Gemini 配置与代理约束
+
+- **默认代理约束**：在 **AI 配置 → Google 代理设置** 中配置，默认开启且默认协议为 `https`（支持 `https` / `http` CONNECT 隧道与可选用户名/密码 Basic 认证，支持「测试代理连通性」）；未填专用代理时回退环境变量代理，两者均为空时阻止直连 Google。仅作用于 `generativelanguage.googleapis.com`、`*.googleapis.com`、`*.googleusercontent.com`、`ai.google.dev`，不影响 DeepSeek、火山引擎、通义或本地 ComfyUI。
+- **在线拉取可用模型**：在配置编辑弹窗点击「拉取在线模型」（`POST /api/v1/ai-configs/fetch-models`），调用 Google `/v1beta/models`（按文本 / 图片 / 视频推荐筛选）或 OpenAI 兼容 `/models`，支持替换或追加到模型列表。
+- **Google 视频生成（Gemini Omni Flash）**：AI Studio 旧版 Veo 预览模型停服后，Google 视频默认模型为 `gemini-omni-1.1-flash`（同时预置 `gemini-omni-1.2-flash`），走 Interactions API（`POST /v1beta/interactions`），支持文生视频、首帧、首尾帧过渡（`3s–10s`）与多参考图（最多 6 张，`3s–15s`），兼容异步轮询与内联 base64 视频自动落盘为本地 MP4；显式指定 `veo-*` 时保留旧 `:predictLongRunning` 通道以兼容中转/旧测试。官方 Omni Flash 仅对 **Paid Tier** 开放。
 
 ## Qwen-Image 2.1 本地生图
 
@@ -206,7 +212,7 @@ Storyboard 顶部可展开当前 Episode 成本；**单集 / 整季成本** 选�
 
 SQLite、图片、视频和项目数据存储在配置指定的本机目录。Local H3 的图像发往设置的 ComfyUI 服务；DeepSeek 优化会向文本 Provider 发送 Shot Intent；使用云模型时 Prompt 与必要参考素材会发送给该 Provider。配置图床或代理时也可能经过相应服务。
 
-私有 API Key、数据库、素材、日志与 `.local` 备份不应提交到 Git。Workflow 模板不包含原私人 Prompt 或 API Key，但保留源 Workflow 的模型与 LoRA 名称。更新、迁移前请备份数据库、storage 与私有配置。
+私有 API Key、数据库、素材、日志与 `.local` 备份不应提交到 Git。Google 代理的用户名与密码同样仅保存在本机 SQLite（`global_settings`）中、不会提交到 Git，接口不回传明文，后端日志通过 `redactSecrets` 自动脱敏。Workflow 模板不包含原私人 Prompt 或 API Key，但保留源 Workflow 的模型与 LoRA 名称。更新、迁移前请备份数据库、storage 与私有配置。
 
 ## Troubleshooting
 
@@ -222,6 +228,8 @@ SQLite、图片、视频和项目数据存储在配置指定的本机目录。Lo
 | 本地视频完成后预览未更新 | 更新并构建前端，刷新一次加载新版；长任务完成后应自动更新，同时检查后台任务状态和 MP4 地址 |
 | 费用未知 | 补全实际账户价格、套餐额度或本机成功历史；确认未知费用不会使 API 免费 |
 | 合成 / Keep Static 失败 | 检查现有 FFmpeg 与 ffprobe 路径，参考图与 MP4 是否可访问 |
+| Google 代理被拦截、407 或 TLS 报错 | 在 AI 配置 → Google 代理设置核对地址、端口与用户名/密码；若本机代理为明文 HTTP CONNECT 端口，将协议由 HTTPS 切换为 HTTP 并测试连通性 |
+| Google 预设模型 404 或 Omni Flash 视频无权限 | 在配置编辑弹窗点击「拉取在线模型」更新当前 Key 可用模型；Google 视频默认 `gemini-omni-1.1-flash` 需确认账号已开通 Paid Tier |
 
 ## Current Limitations
 
@@ -232,6 +240,7 @@ SQLite、图片、视频和项目数据存储在配置指定的本机目录。Lo
 - H3 语法校验只检查结构与 Mode 对齐，不证明模型执行效果、对白长度或视觉质量。
 - 单集 / 整季预算按当前集比例推算，计费没有自动汇率、自动账单同步；文本优化、图片和 TTS 费用不纳入视频报价。`per_image` 当前按每 Shot 一个计费图像单位估算，多图计费需按实际账户调整预算。
 - 本机估速依赖成功输出样本；缺少 FFmpeg / ffprobe 时无法完整合成或测量。Web 改动不等于重新发布了 Electron 安装包。
+- Google 专用代理（含 HTTP/HTTPS CONNECT 账密认证）、在线拉取模型与 Gemini Omni Flash Interactions API 均基于本地 Mock 验证；真实云端 Paid Tier 视频生成效果、计费与页面端到端流程仍待用户实测。
 
 ## Roadmap
 
@@ -253,6 +262,8 @@ npm run build
 测试覆盖增量迁移、模型选择、混合分发、Mock ComfyUI 协议、云调用确认、Prompt 缓存与成本公式，以及 Qwen 候选选用、项目素材关联、长任务恢复和一键流程暂停 / 取消，不调用真实收费云视频 API。长任务通过虚拟时钟覆盖 22 分钟生成和更长排队；实机 H3 验证独立执行。
 
 2026-10-20：四步 H3 默认模板切换后，后端 151 项测试通过，当前 ComfyUI 节点及权重只读检查通过；本轮没有提交 GPU 或云端生成任务。
+
+2026-11-20：新增 Google 代理约束、在线模型拉取与 Gemini Omni Flash 视频支持后，后端 159 项、前端 31 项测试通过，前端生产构建成功；本轮测试均基于本地 Mock，未调用真实收费云端视频 API。
 
 ## Acknowledgements & License
 
